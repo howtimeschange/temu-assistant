@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# JD Price Monitor 启动脚本
+PROJ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"$PROJ_DIR/venv/bin/python" "$PROJ_DIR/cli.py" "$@"

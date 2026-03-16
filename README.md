@@ -2,6 +2,41 @@
 
 > 监控京东自营店铺所有 SKU 的前台价格，自动发现破价商品，通过钉钉推送告警。
 
+## 一键安装
+
+> **前置条件：** Python 3.9+、Node.js 18+、Git、Chrome 浏览器
+
+**macOS / Linux** — 打开终端，粘贴一条命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/howtimeschange/jd-price-monitor/main/setup.sh | bash
+```
+
+**Windows** — 打开 PowerShell，粘贴一条命令：
+
+```powershell
+irm https://raw.githubusercontent.com/howtimeschange/jd-price-monitor/main/setup.ps1 | iex
+```
+
+脚本会自动完成：克隆仓库 → 创建 Python 虚拟环境 → 安装所有依赖 → 安装 bb-browser → 部署 JD adapter → 生成启动脚本。
+
+<details>
+<summary>已有仓库 / 手动安装</summary>
+
+```bash
+# macOS / Linux
+git clone https://github.com/howtimeschange/jd-price-monitor.git
+cd jd-price-monitor
+bash install.sh
+
+# Windows PowerShell
+git clone https://github.com/howtimeschange/jd-price-monitor.git
+cd jd-price-monitor
+Set-ExecutionPolicy Bypass -Scope Process; .\install.ps1
+```
+
+</details>
+
 ## 技术方案
 
 本项目使用 **[bb-browser](https://github.com/epiral/bb-browser)** 方案抓取价格，完全绕过京东反爬检测：
@@ -9,30 +44,6 @@
 - bb-browser 在用户**真实 Chrome 浏览器**内执行 JS，使用浏览器本身的 Cookie 和网络
 - 不需要任何 API Key，不会被风控拦截
 - 价格通过滚动触发懒加载，100% 准确
-
-## 快速安装
-
-> **前置条件：** Python 3.9+、Node.js 18+、Chrome 浏览器
-
-**macOS / Linux：**
-```bash
-git clone https://github.com/howtimeschange/jd-price-monitor.git
-cd jd-price-monitor
-bash install.sh
-```
-
-**Windows：**
-```
-# 方式一：双击 install.bat
-# 方式二：PowerShell（推荐）
-Set-ExecutionPolicy Bypass -Scope Process; .\install.ps1
-```
-
-安装脚本会自动完成：
-- 创建 Python 虚拟环境并安装所有依赖（rich、questionary、openpyxl 等）
-- 安装 / 更新 bb-browser 及社区 adapter 库
-- 部署 JD 价格抓取 adapter
-- 生成 `jd-monitor` 启动脚本
 
 ## 安装后的一次性配置
 
@@ -110,9 +121,11 @@ jd-monitor.bat   # 或双击桌面快捷方式（安装时自动创建）
 
 ```
 jd-price-monitor/
-├── install.sh                # 一键安装（macOS / Linux）
-├── install.bat               # 一键安装（Windows CMD）
-├── install.ps1               # 一键安装（Windows PowerShell）
+├── setup.sh                  # 远程一键安装入口（macOS / Linux，curl | bash）
+├── setup.ps1                 # 远程一键安装入口（Windows，irm | iex）
+├── install.sh                # 本地安装脚本（macOS / Linux）
+├── install.bat               # 本地安装脚本（Windows CMD）
+├── install.ps1               # 本地安装脚本（Windows PowerShell）
 ├── cli.py                    # ✨ 交互式 CLI 入口
 ├── config.yaml               # 主配置文件
 ├── main.py                   # 巡检核心逻辑（可独立运行）
