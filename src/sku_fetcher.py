@@ -1,159 +1,148 @@
 """
-SKU 列表抓取模块
-从京东店铺商品列表页爬取所有 SKU ID 和吊牌价（original_price）
-接口：https://search.jd.com/search?keyword=&enc=utf-8&shopId=XXXX&page=1
+SKU 列表 + 价格抓取模块（bb-browser 实现）
+
+通过 bb-browser 在用户真实 Chrome 里执行 adapter，逐页抓取店铺商品列表。
+依赖：bb-browser daemon 运行中，Chrome 已登录 JD，mall.jd.com tab 已打开。
 """
-import asyncio
-import random
+import json
 import logging
 import re
-import json
+import subprocess
+import time
 from typing import List, Dict
 
-from playwright.async_api import async_playwright, Page
-
 from .config import load_config
-from .cookie_utils import load_cookies
 
 logger = logging.getLogger(__name__)
 
 
-async def _scroll_to_bottom(page: Page):
-    """缓慢滚动到底部，触发懒加载"""
-    prev_height = 0
-    for _ in range(20):
-        height = await page.evaluate("document.body.scrollHeight")
-        if height == prev_height:
-            break
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await asyncio.sleep(0.8)
-        prev_height = height
+def _bb(args: list, cdp_port: str, timeout: int = 15):
+    return subprocess.run(
+        ["bb-browser"] + args + ["--port", cdp_port],
+        capture_output=True, text=True, timeout=timeout,
+    )
 
 
-async def fetch_sku_list() -> List[Dict]:
+def _get_jd_tab(cdp_port: str) -> str:
+    r = _bb(["tab", "list"], cdp_port)
+    for line in r.stdout.splitlines():
+        if "mall.jd.com" in line:
+            m = re.search(r'\[(\d+)\]', line)
+            if m:
+                return m.group(1)
+    return "0"
+
+
+def _navigate_and_wait(url: str, cdp_port: str) -> bool:
+    tab = _get_jd_tab(cdp_port)
+    _bb(["tab", tab], cdp_port)
+    _bb(["eval", f"location.href='{url}'", "--tab", tab], cdp_port)
+    for _ in range(25):
+        time.sleep(1)
+        r = _bb(
+            ["eval", "document.querySelectorAll('li.jSubObject').length", "--tab", tab],
+            cdp_port, timeout=5,
+        )
+        try:
+            if int(r.stdout.strip()) > 0:
+                time.sleep(5)
+                return True
+        except Exception:
+            pass
+    time.sleep(5)
+    return False
+
+
+def _scrape_current_page(cdp_port: str) -> dict:
+    r = _bb(["site", "jd/shop-prices", "--json"], cdp_port, timeout=60)
+    if r.returncode != 0:
+        return {"error": r.stderr.strip(), "items": []}
+    try:
+        out = r.stdout.strip()
+        s = out.find("{")
+        if s > 0:
+            out = out[s:]
+        parsed = json.loads(out)
+        if not parsed.get("success", True):
+            return {"error": parsed.get("error", "unknown"), "items": []}
+        return parsed.get("data", parsed)
+    except Exception as e:
+        return {"error": str(e), "items": []}
+
+
+def fetch_sku_list() -> List[Dict]:
     """
-    返回列表，每项：
+    逐页抓取店铺所有 SKU，返回列表，每项：
       {
-        "sku_id": "100012043978",
-        "name": "ASICS亚瑟士跑步鞋...",
-        "original_price": 999.0,   # 吊牌价/划线价，可能为 None
-        "product_url": "https://item.jd.com/100012043978.html"
+        "sku_id":         "100012043978",
+        "name":           "ASICS亚瑟士跑步鞋...",
+        "original_price": 999.0,   # 划线价，可能为 None
+        "current_price":  599.0,   # 前台价，可能为 None
+        "product_url":    "https://item.jd.com/100012043978.html"
       }
     """
     cfg = load_config()
-    shop_id = cfg["shop"]["shop_id"]
-    delay_min = cfg["monitor"]["delay_min_seconds"]
-    delay_max = cfg["monitor"]["delay_max_seconds"]
+    shop_id   = cfg["shop"].get("shop_id", "")
+    vendor_id = cfg["shop"].get("vendor_id", shop_id)
+    cdp_port  = str(cfg.get("cdp_port", 9222))
+    page_size = 60
 
-    skus: Dict[str, Dict] = {}
+    base_url = (
+        f"https://mall.jd.com/advance_search-{vendor_id}-{shop_id}"
+        f"-{shop_id}-0-0-0-1-{{page}}-{page_size}.html"
+    )
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-            ],
-        )
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1440, "height": 900},
-            locale="zh-CN",
-        )
-        # 注入反检测脚本
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.chrome = { runtime: {} };
-        """)
-        cookies = load_cookies()
-        if cookies:
-            await context.add_cookies(cookies)
+    all_items: Dict[str, Dict] = {}
+    page_no = 1
+    consecutive_empty = 0
 
-        page = await context.new_page()
-        page_no = 1
+    logger.info(f"开始抓取店铺 SKU 列表（shop_id={shop_id}）...")
+    ok = _navigate_and_wait(base_url.format(page=1), cdp_port)
+    logger.info(f"第 1 页{'已加载' if ok else '超时，继续'}")
 
-        while True:
-            url = (
-                f"https://search.jd.com/search?enc=utf-8"
-                f"&shopId={shop_id}&page={page_no}&s=1&click=0"
-            )
-            logger.info(f"抓取商品列表第 {page_no} 页：{url}")
+    while True:
+        data  = _scrape_current_page(cdp_port)
+        items = data.get("items", [])
 
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(random.uniform(delay_min, delay_max))
-                await _scroll_to_bottom(page)
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.warning(f"页面加载失败 page={page_no}: {e}")
+        if not items:
+            consecutive_empty += 1
+            logger.warning(f"第 {page_no} 页无商品（连续 {consecutive_empty} 次）")
+            if consecutive_empty >= 2:
                 break
-
-            # 解析商品卡片
-            items = await page.evaluate("""
-                () => {
-                    const cards = document.querySelectorAll('.gl-item, li[data-sku]');
-                    return Array.from(cards).map(el => {
-                        const skuId = el.getAttribute('data-sku') || el.getAttribute('sku-id') || '';
-                        const nameEl = el.querySelector('.p-name a em, .p-name a');
-                        const name = nameEl ? nameEl.innerText.trim() : '';
-                        // 吊牌价（划线价）
-                        const opEl = el.querySelector('.p-price-op, .p-op-price, del');
-                        const opText = opEl ? opEl.innerText.replace(/[^0-9.]/g, '') : '';
-                        // 当前展示价
-                        const priceEl = el.querySelector('.p-price strong i, .p-price i');
-                        const priceText = priceEl ? priceEl.innerText.replace(/[^0-9.]/g, '') : '';
-                        return { skuId, name, opText, priceText };
-                    });
-                }
-            """)
-
-            new_count = 0
+        else:
+            consecutive_empty = 0
             for item in items:
-                sku_id = item.get("skuId", "").strip()
-                if not sku_id:
+                sku_id = item.get("skuId", "")
+                if not sku_id or sku_id in all_items:
                     continue
-                if sku_id in skus:
-                    continue
-                original_price = None
                 try:
-                    if item.get("opText"):
-                        original_price = float(item["opText"])
-                except ValueError:
-                    pass
-                skus[sku_id] = {
-                    "sku_id": sku_id,
-                    "name": item.get("name", ""),
-                    "original_price": original_price,
-                    "product_url": f"https://item.jd.com/{sku_id}.html",
+                    orig = float(item["originalPrice"]) if item.get("originalPrice") else None
+                except (TypeError, ValueError):
+                    orig = None
+                try:
+                    cur = float(item["price"]) if item.get("price") else None
+                except (TypeError, ValueError):
+                    cur = None
+                all_items[sku_id] = {
+                    "sku_id":         sku_id,
+                    "name":           item.get("name", ""),
+                    "original_price": orig,
+                    "current_price":  cur,
+                    "product_url":    item.get("href", f"https://item.jd.com/{sku_id}.html"),
                 }
-                new_count += 1
+            logger.info(
+                f"第 {page_no} 页：{len(items)} 个，有价格 {data.get('withPrice', 0)}，累计 {len(all_items)}"
+            )
 
-            logger.info(f"第 {page_no} 页新增 {new_count} 个 SKU，累计 {len(skus)} 个")
+        next_url = data.get("nextUrl")
+        if not next_url:
+            logger.info("已到最后一页")
+            break
 
-            if new_count == 0:
-                logger.info("没有新 SKU，已到最后一页")
-                break
+        page_no += 1
+        ok = _navigate_and_wait(next_url, cdp_port)
+        logger.info(f"第 {page_no} 页{'已加载' if ok else '超时，继续'}")
 
-            # 检查是否有下一页
-            has_next = await page.evaluate("""
-                () => {
-                    const next = document.querySelector('.pn-next, a.fp-next');
-                    return next && !next.classList.contains('disabled');
-                }
-            """)
-            if not has_next:
-                break
-
-            page_no += 1
-            await asyncio.sleep(random.uniform(delay_min + 0.5, delay_max + 1))
-
-        await browser.close()
-
-    result = list(skus.values())
+    result = list(all_items.values())
     logger.info(f"共抓取 {len(result)} 个 SKU")
     return result
