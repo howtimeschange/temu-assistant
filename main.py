@@ -88,6 +88,20 @@ def run_once():
     logger.info("=" * 60)
 
 
+def _wait_for_login(logger):
+    """首次启动前给用户预留登录时间"""
+    cfg = load_config()
+    wait_sec = cfg.get("startup", {}).get("login_wait_seconds", 0)
+    if wait_sec <= 0:
+        return
+    logger.info(f"⏳ 等待 {wait_sec} 秒供登录（请在 Chrome 中扫码/登录京东）...")
+    for remaining in range(wait_sec, 0, -1):
+        print(f"\r  还剩 {remaining:3d} 秒...  ", end="", flush=True)
+        time.sleep(1)
+    print("\r  登录等待结束，开始巡检。              ")
+    logger.info("登录等待结束，开始巡检。")
+
+
 def main():
     setup_logging()
     logger = logging.getLogger("main")
@@ -96,7 +110,13 @@ def main():
     parser.add_argument(
         "--loop", action="store_true", help="循环运行（按 config.yaml 中的 interval_minutes）"
     )
+    parser.add_argument(
+        "--no-login-wait", action="store_true", help="跳过首次登录等待（非第一次启动时使用）"
+    )
     args = parser.parse_args()
+
+    if not args.no_login_wait:
+        _wait_for_login(logger)
 
     if args.loop:
         cfg = load_config()

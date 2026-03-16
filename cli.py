@@ -45,6 +45,7 @@ from rich.rule import Rule
 
 sys.path.insert(0, os.path.dirname(__file__))
 from src.config import load_config, save_config, reload_config
+from src.excel_writer import write_price_excel
 
 console = Console()
 
@@ -141,14 +142,23 @@ def _run_export_with_progress():
         f"https://mall.jd.com/advance_search-{vendor_id}-{shop_id}"
         f"-{shop_id}-0-0-0-1-{{page}}-{page_size}.html"
     )
-    out_dir  = PROJ_DIR / cfg["output"].get("data_dir", "data")
+    excel_to_desktop = cfg["output"].get("excel_to_desktop", True)
+    if excel_to_desktop:
+        out_dir = Path.home() / "Desktop"
+    else:
+        out_dir = PROJ_DIR / cfg["output"].get("data_dir", "data")
     out_dir.mkdir(parents=True, exist_ok=True)
-    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_file = out_dir / f"price_list_{ts}.xlsx"
+
+    from src.sku_fetcher import _find_bb_browser
+    try:
+        _bb_bin = _find_bb_browser()
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/red]")
+        return 0, ""
 
     def bb(args, timeout=15):
         return _sp.run(
-            ["bb-browser"] + args + ["--port", cdp_port],
+            [_bb_bin] + args + ["--port", cdp_port],
             capture_output=True, text=True, timeout=timeout,
         )
 
@@ -248,54 +258,40 @@ def _run_export_with_progress():
             ok = navigate_and_wait(next_url)
             upd(f"第 {page_no} 页{'已加载' if ok else '超时，继续'}")
 
-        progress.update(task, description=f"[green]完成，共 {len(all_items)} 个商品，正在写 Excel...")
+        progress.update(task, description=f"[green]完成，共 {len(all_items)} 个商品，正在执行兜底补价...")
 
-    # ── 写 Excel ──
-    try:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
-    except ImportError:
-        _sp.run([sys.executable, "-m", "pip", "install", "-q", "openpyxl"])
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment
+    # ── 兜底：对仍无价格的 SKU 访问详情页补价 ──
+    from src.sku_fetcher import fill_missing_prices
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "价格列表"
-
-    headers     = ["款号(SKU ID)", "商品名称", "页面价(元)", "原价(元)", "商品链接"]
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
-    for col, h in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=h)
-        cell.fill, cell.font = header_fill, header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    for row_idx, item in enumerate(all_items.values(), 2):
-        ws.cell(row=row_idx, column=1, value=item["skuId"])
-        ws.cell(row=row_idx, column=2, value=item.get("name", ""))
+    # 先把 all_items 转成标准格式（sku_fetcher 兼容）
+    sku_list = []
+    for raw in all_items.values():
         try:
-            ws.cell(row=row_idx, column=3, value=float(item["price"]) if item.get("price") else "")
+            cur = float(raw["price"]) if raw.get("price") else None
         except Exception:
-            ws.cell(row=row_idx, column=3, value=item.get("price", ""))
+            cur = None
         try:
-            ws.cell(row=row_idx, column=4, value=float(item["originalPrice"]) if item.get("originalPrice") else "")
+            orig = float(raw["originalPrice"]) if raw.get("originalPrice") else None
         except Exception:
-            ws.cell(row=row_idx, column=4, value=item.get("originalPrice", ""))
-        ws.cell(row=row_idx, column=5, value=item.get("href", ""))
-        if row_idx % 2 == 0:
-            for col in range(1, 6):
-                ws.cell(row=row_idx, column=col).fill = PatternFill("solid", fgColor="EBF3FB")
+            orig = None
+        sku_list.append({
+            "sku_id":         raw["skuId"],
+            "name":           raw.get("name", ""),
+            "current_price":  cur,
+            "original_price": orig,
+            "product_url":    raw.get("href", f"https://item.jd.com/{raw['skuId']}.html"),
+            "price_source":   "list_page",
+        })
 
-    ws.column_dimensions["A"].width = 18
-    ws.column_dimensions["B"].width = 55
-    ws.column_dimensions["C"].width = 14
-    ws.column_dimensions["D"].width = 14
-    ws.column_dimensions["E"].width = 55
-    ws.freeze_panes = "A2"
-    wb.save(str(out_file))
+    missing_before = sum(1 for r in sku_list if r["current_price"] is None)
+    if missing_before > 0:
+        fill_missing_prices(sku_list, cdp_port)
 
-    return len(all_items), str(out_file)
+    # ── 写 Excel（统一调用 excel_writer）──
+    from src.excel_writer import write_price_excel
+    out_file = write_price_excel(sku_list, out_dir)
+
+    return len(sku_list), str(out_file)
 
 
 def action_export():
@@ -348,9 +344,9 @@ def action_check_once():
     ) as progress:
         task = progress.add_task("[cyan]正在巡检...", total=None)
 
-        # 在子进程跑，避免事件循环冲突
+        # 在子进程跑，避免事件循环冲突；CLI 里已确认登录，跳过等待
         result = subprocess.run(
-            [sys.executable, str(PROJ_DIR / "main.py")],
+            [sys.executable, str(PROJ_DIR / "main.py"), "--no-login-wait"],
             capture_output=True, text=True,
             cwd=str(PROJ_DIR),
         )
@@ -375,21 +371,117 @@ def action_check_once():
 # ③ 循环巡检
 # ═══════════════════════════════════════════════════════════════════
 
+def _loop_runner(export_excel: bool):
+    """
+    循环巡检核心逻辑（在当前进程内执行，支持 Ctrl+C 停止）。
+    export_excel=True 时每轮巡检后自动导出 Excel 到桌面。
+    """
+    from src.config import reload_config as _rcfg
+    from src.sku_fetcher import fetch_sku_list
+    from src.checker import check_violations
+    from src.dingtalk import send_alert
+    from src.storage import save_results, cleanup_old_files
+    from src.excel_writer import write_price_excel
+    import logging, time
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logger = logging.getLogger("loop")
+
+    def do_export(sku_list):
+        cfg = _rcfg()
+        excel_to_desktop = cfg["output"].get("excel_to_desktop", True)
+        out_dir = Path.home() / "Desktop" if excel_to_desktop else PROJ_DIR / cfg["output"].get("data_dir", "data")
+        out_file = write_price_excel(sku_list, out_dir)
+        logger.info(f"✅ Excel 已导出：{out_file}")
+        return out_file
+
+    cfg = _rcfg()
+    interval = cfg["monitor"]["interval_minutes"] * 60
+    logger.info(f"循环模式启动，每 {cfg['monitor']['interval_minutes']} 分钟执行一次")
+    if export_excel:
+        logger.info("每次巡检后将自动导出 Excel 到桌面")
+
+    while True:
+        start = time.time()
+        logger.info("=" * 60)
+        logger.info(f"开始巡检 | {cfg['shop']['shop_name']}")
+        logger.info("=" * 60)
+
+        try:
+            sku_list = fetch_sku_list()
+        except Exception as e:
+            logger.error(f"SKU 抓取失败: {e}", exc_info=True)
+            time.sleep(interval)
+            continue
+
+        if not sku_list:
+            logger.warning("未抓取到任何 SKU，请检查 bb-browser daemon / Chrome 登录状态")
+        else:
+            success_count = sum(1 for r in sku_list if r.get("current_price") is not None)
+            logger.info(f"共获取 {len(sku_list)} 个 SKU，有价格 {success_count} 个")
+            violated = check_violations(sku_list)
+            elapsed = time.time() - start
+            if violated:
+                logger.warning(f"发现 {len(violated)} 个破价 SKU！")
+                for v in violated:
+                    logger.warning(
+                        f"  [{v['sku_id']}] {v['name'][:30]} "
+                        f"吊牌价¥{v.get('original_price','N/A')} → "
+                        f"前台价¥{v.get('current_price','N/A')} "
+                        f"({v['ratio']*100:.1f}%)"
+                    )
+                send_alert(violated)
+            else:
+                logger.info("未发现破价 SKU ✅")
+            save_results(sku_list, violated)
+            cleanup_old_files()
+            logger.info(f"巡检完成，耗时 {elapsed:.1f} 秒")
+
+            if export_excel:
+                try:
+                    do_export(sku_list)
+                except Exception as e:
+                    logger.error(f"Excel 导出失败: {e}")
+
+        cfg = _rcfg()  # 每轮重新读取配置，支持热更新
+        logger.info(f"等待 {cfg['monitor']['interval_minutes']} 分钟后下次执行...")
+        time.sleep(interval)
+
+
 def action_loop():
     cfg      = reload_config()
     interval = cfg["monitor"]["interval_minutes"]
+    loop_export = cfg["output"].get("loop_export_excel", False)
+
     console.print(Rule("[cyan]循环巡检[/cyan]"))
     console.print(
         f"[dim]将每 [cyan bold]{interval}[/cyan bold] 分钟执行一次巡检。\n"
         "按 [bold]Ctrl+C[/bold] 停止。[/dim]\n"
     )
 
+    # 是否每轮导出 Excel
+    export_excel = questionary.confirm(
+        f"每次巡检后自动导出 Excel 到桌面？（当前配置：{'是' if loop_export else '否'}）",
+        default=loop_export,
+        style=Q_STYLE,
+    ).ask()
+    if export_excel is None:
+        return
+
+    # 同步更新配置
+    if export_excel != loop_export:
+        cfg["output"]["loop_export_excel"] = export_excel
+        save_config(cfg)
+
     run_in = questionary.select(
         "请选择运行方式：",
         choices=[
-            {"name": "在当前终端前台运行（Ctrl+C 停止）",          "value": "fg"},
-            {"name": "以后台进程运行（输出到 logs/loop.log）",     "value": "bg"},
-            {"name": "返回",                                        "value": "back"},
+            {"name": "在当前终端前台运行（Ctrl+C 停止）",      "value": "fg"},
+            {"name": "以后台进程运行（输出到 logs/loop.log）", "value": "bg"},
+            {"name": "返回",                                    "value": "back"},
         ],
         style=Q_STYLE,
     ).ask()
@@ -400,18 +492,17 @@ def action_loop():
     if run_in == "fg":
         console.print("\n[dim]启动前台循环巡检，Ctrl+C 停止...[/dim]\n")
         try:
-            subprocess.run(
-                [sys.executable, str(PROJ_DIR / "main.py"), "--loop"],
-                cwd=str(PROJ_DIR),
-            )
+            _loop_runner(export_excel=export_excel)
         except KeyboardInterrupt:
             console.print("\n[yellow]已停止循环巡检[/yellow]")
     else:
         log_dir  = PROJ_DIR / cfg["output"].get("log_dir", "logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "loop.log"
+        # 将 export_excel 作为命令行参数传入子进程
+        extra = ["--export-excel"] if export_excel else []
         proc = subprocess.Popen(
-            [sys.executable, str(PROJ_DIR / "main.py"), "--loop"],
+            [sys.executable, str(PROJ_DIR / "loop_worker.py")] + extra,
             stdout=open(str(log_file), "a"),
             stderr=subprocess.STDOUT,
             cwd=str(PROJ_DIR),
@@ -420,7 +511,8 @@ def action_loop():
         console.print(Panel(
             f"[green bold]✅ 后台进程已启动[/green bold]\n\n"
             f"  PID：[cyan]{proc.pid}[/cyan]\n"
-            f"  日志：[link=file://{log_file}]{log_file}[/link]\n\n"
+            f"  日志：[link=file://{log_file}]{log_file}[/link]\n"
+            f"  导出 Excel：{'✅ 开启' if export_excel else '❌ 关闭'}\n\n"
             f"  停止命令：[bold]kill {proc.pid}[/bold]",
             border_style="green", padding=(1, 2),
         ))
@@ -431,74 +523,159 @@ def action_loop():
 # ④ 定时任务（cron）
 # ═══════════════════════════════════════════════════════════════════
 
+def _get_crontab_lines():
+    """读取当前 crontab，返回 (全部行列表, 本项目相关行索引列表)"""
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return [], []
+        lines = r.stdout.splitlines()
+        proj_path = str(PROJ_DIR)
+        related = [i for i, l in enumerate(lines) if "main.py" in l and proj_path in l]
+        return lines, related
+    except FileNotFoundError:
+        return None, None  # crontab 不可用
+
+
+def _write_crontab(lines):
+    content = "\n".join(lines) + ("\n" if lines else "")
+    proc = subprocess.run(["crontab", "-"], input=content, capture_output=True, text=True)
+    return proc.returncode == 0, proc.stderr
+
+
 def action_cron():
     cfg      = reload_config()
     interval = cfg["monitor"]["interval_minutes"]
-    console.print(Rule("[cyan]创建系统定时任务[/cyan]"))
 
-    # 计算 cron 表达式
-    if interval >= 60 and 60 % (interval // 60) == 0:
-        every_h = interval // 60
-        cron_expr = f"0 */{every_h} * * *"
-        cron_desc = f"每 {every_h} 小时"
-    else:
-        cron_expr = f"*/{interval} * * * *"
-        cron_desc = f"每 {interval} 分钟"
+    while True:
+        console.print(Rule("[cyan]定时任务管理[/cyan]"))
 
-    python_bin = sys.executable
-    proj_path  = str(PROJ_DIR)
-    log_dir    = PROJ_DIR / cfg["output"].get("log_dir", "logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file   = log_dir / "cron.log"
+        all_lines, related_idx = _get_crontab_lines()
 
-    cron_line = (
-        f"{cron_expr}  cd \"{proj_path}\" && "
-        f"\"{python_bin}\" main.py >> \"{log_file}\" 2>&1"
-    )
-
-    console.print(f"\n建议的 crontab 条目（[dim]{cron_desc}[/dim]）：\n")
-    console.print(Panel(cron_line, border_style="cyan", padding=(0, 1)))
-
-    action = questionary.select(
-        "操作：",
-        choices=[
-            {"name": "自动写入 crontab（追加）",   "value": "add"},
-            {"name": "仅复制到剪贴板",              "value": "copy"},
-            {"name": "返回",                        "value": "back"},
-        ],
-        style=Q_STYLE,
-    ).ask()
-
-    if action == "add":
-        try:
-            # 读取现有 crontab
-            existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            existing_lines = existing.stdout if existing.returncode == 0 else ""
-            # 检查是否已存在
-            if "main.py" in existing_lines and proj_path in existing_lines:
-                console.print("[yellow]⚠️  crontab 中已存在本项目的任务，跳过添加[/yellow]")
-            else:
-                new_crontab = existing_lines.rstrip("\n") + "\n" + cron_line + "\n"
-                proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
-                if proc.returncode == 0:
-                    console.print("[green]✅ 已成功写入 crontab[/green]")
-                else:
-                    console.print(f"[red]❌ 写入失败：{proc.stderr}[/red]")
-        except FileNotFoundError:
+        if all_lines is None:
             console.print("[red]❌ 系统未找到 crontab 命令（仅支持 macOS/Linux）[/red]")
+            Prompt.ask("[dim]按 Enter 返回[/dim]")
+            return
 
-    elif action == "copy":
-        try:
-            subprocess.run(["pbcopy"], input=cron_line, text=True)
-            console.print("[green]✅ 已复制到剪贴板[/green]")
-        except FileNotFoundError:
-            try:
-                subprocess.run(["xclip", "-selection", "clipboard"], input=cron_line, text=True)
-                console.print("[green]✅ 已复制到剪贴板[/green]")
-            except FileNotFoundError:
-                console.print(f"[yellow]请手动复制上方命令[/yellow]")
+        # ── 显示当前已有任务 ─────────────────────────────────────────
+        if related_idx:
+            console.print(f"[bold]当前已有 {len(related_idx)} 条本项目定时任务：[/bold]\n")
+            t = Table(box=box.SIMPLE_HEAVY, show_header=True, header_style="bold cyan")
+            t.add_column("#",              width=4,  style="dim")
+            t.add_column("Cron 表达式",    width=20)
+            t.add_column("命令（摘要）")
+            for seq, idx in enumerate(related_idx, 1):
+                line  = all_lines[idx]
+                parts = line.split(None, 5)
+                expr  = " ".join(parts[:5]) if len(parts) >= 5 else line[:20]
+                cmd   = (parts[5][:80] + "…") if len(parts) >= 6 and len(parts[5]) > 80 else (parts[5] if len(parts) >= 6 else "")
+                t.add_row(str(seq), expr, cmd)
+            console.print(t)
+        else:
+            console.print("[dim]当前没有本项目的定时任务。[/dim]\n")
 
-    console.print()
+        # ── 操作菜单 ─────────────────────────────────────────────────
+        choices = []
+        if related_idx:
+            choices.append({"name": "🗑   删除定时任务",   "value": "delete"})
+        choices += [
+            {"name": "➕  新增定时任务",   "value": "add"},
+            {"name": "↩  返回主菜单",      "value": "back"},
+        ]
+
+        action = questionary.select("操作：", choices=choices, style=Q_STYLE).ask()
+        if action is None or action == "back":
+            break
+
+        # ── 新增 ─────────────────────────────────────────────────────
+        if action == "add":
+            cfg = reload_config()
+            interval = cfg["monitor"]["interval_minutes"]
+
+            if interval >= 60 and interval % 60 == 0:
+                every_h = interval // 60
+                cron_expr = f"0 */{every_h} * * *"
+                cron_desc = f"每 {every_h} 小时"
+            else:
+                cron_expr = f"*/{interval} * * * *"
+                cron_desc = f"每 {interval} 分钟"
+
+            python_bin = sys.executable
+            proj_path  = str(PROJ_DIR)
+            log_dir    = PROJ_DIR / cfg["output"].get("log_dir", "logs")
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file   = log_dir / "cron.log"
+
+            cron_line = (
+                f"{cron_expr}  cd \"{proj_path}\" && "
+                f"\"{python_bin}\" main.py --no-login-wait >> \"{log_file}\" 2>&1"
+            )
+
+            console.print(f"\n将添加以下条目（[dim]{cron_desc}[/dim]）：\n")
+            console.print(Panel(cron_line, border_style="cyan", padding=(0, 1)))
+            console.print()
+
+            # 支持自定义 cron 表达式
+            custom = questionary.confirm(
+                "使用自定义 cron 表达式？（否则使用上方自动生成）",
+                default=False, style=Q_STYLE,
+            ).ask()
+            if custom:
+                raw_expr = questionary.text(
+                    "输入 cron 表达式（5段，如 0 */2 * * *）：",
+                    style=Q_STYLE,
+                    validate=lambda v: True if len(v.split()) == 5 else "需要5段",
+                ).ask()
+                if raw_expr is None:
+                    continue
+                cron_line = (
+                    f"{raw_expr.strip()}  cd \"{proj_path}\" && "
+                    f"\"{python_bin}\" main.py --no-login-wait >> \"{log_file}\" 2>&1"
+                )
+
+            if not questionary.confirm("确认写入 crontab？", default=True, style=Q_STYLE).ask():
+                continue
+
+            ok, err = _write_crontab(all_lines + [cron_line])
+            if ok:
+                console.print("[green]✅ 已成功写入 crontab[/green]")
+            else:
+                console.print(f"[red]❌ 写入失败：{err}[/red]")
+            console.print()
+
+        # ── 删除 ─────────────────────────────────────────────────────
+        elif action == "delete":
+            del_choices = []
+            for seq, idx in enumerate(related_idx, 1):
+                line  = all_lines[idx]
+                parts = line.split(None, 5)
+                expr  = " ".join(parts[:5]) if len(parts) >= 5 else line[:20]
+                del_choices.append({"name": f"#{seq}  {expr}", "value": seq - 1})
+            del_choices.append({"name": "取消", "value": -1})
+
+            which = questionary.select(
+                "选择要删除的任务：",
+                choices=del_choices,
+                style=Q_STYLE,
+            ).ask()
+            if which is None or which == -1:
+                continue
+
+            target_idx = related_idx[which]
+            removed    = all_lines[target_idx]
+            new_lines  = [l for i, l in enumerate(all_lines) if i != target_idx]
+
+            console.print(f"\n将删除：[dim]{removed[:100]}[/dim]")
+            if not questionary.confirm("确认删除？", default=False, style=Q_STYLE).ask():
+                continue
+
+            ok, err = _write_crontab(new_lines)
+            if ok:
+                console.print("[green]✅ 已删除[/green]")
+            else:
+                console.print(f"[red]❌ 写入失败：{err}[/red]")
+            console.print()
+
     Prompt.ask("[dim]按 Enter 返回主菜单[/dim]")
 
 
@@ -693,6 +870,46 @@ def settings_interval():
     console.print(f"[green]✅ 巡检间隔已更新为 {val} 分钟[/green]")
 
 
+def settings_export():
+    """配置 Excel 输出位置 + 登录等待"""
+    cfg = reload_config()
+    console.print(Rule("[cyan]设置导出 & 启动[/cyan]"))
+
+    # Excel 输出位置
+    cur_desktop = cfg["output"].get("excel_to_desktop", True)
+    to_desktop = questionary.confirm(
+        f"导出 Excel 时保存到桌面？（否则保存到 data/ 目录，当前：{'桌面' if cur_desktop else 'data/'}）",
+        default=cur_desktop, style=Q_STYLE,
+    ).ask()
+    if to_desktop is not None:
+        cfg["output"]["excel_to_desktop"] = to_desktop
+
+    # 循环巡检导出 Excel
+    cur_loop = cfg["output"].get("loop_export_excel", False)
+    loop_export = questionary.confirm(
+        f"循环巡检时每轮自动导出 Excel？（当前：{'是' if cur_loop else '否'}）",
+        default=cur_loop, style=Q_STYLE,
+    ).ask()
+    if loop_export is not None:
+        cfg["output"]["loop_export_excel"] = loop_export
+
+    # 首次登录等待秒数
+    cur_wait = cfg.get("startup", {}).get("login_wait_seconds", 30)
+    raw = questionary.text(
+        f"首次启动等待登录的秒数（0 = 不等待，当前：{cur_wait}）：",
+        default=str(cur_wait),
+        style=Q_STYLE,
+        validate=lambda v: True if v.strip().isdigit() else "请输入整数",
+    ).ask()
+    if raw is not None:
+        if "startup" not in cfg:
+            cfg["startup"] = {}
+        cfg["startup"]["login_wait_seconds"] = int(raw)
+
+    save_config(cfg)
+    console.print("[green]✅ 导出设置已保存[/green]")
+
+
 def action_settings():
     while True:
         console.print(Rule("[cyan]设置[/cyan]"))
@@ -703,6 +920,7 @@ def action_settings():
                 {"name": "📊  破价阈值",               "value": "threshold"},
                 {"name": "🔔  钉钉 Webhook",           "value": "webhook"},
                 {"name": "⏱  巡检间隔",               "value": "interval"},
+                {"name": "📂  Excel 输出 & 启动设置", "value": "export"},
                 {"name": "↩  返回主菜单",              "value": "back"},
             ],
             style=Q_STYLE,
@@ -716,6 +934,8 @@ def action_settings():
             settings_webhook()
         elif choice == "interval":
             settings_interval()
+        elif choice == "export":
+            settings_export()
         else:
             break
         console.print()

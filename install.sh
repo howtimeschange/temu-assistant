@@ -119,7 +119,8 @@ step "4/5" "安装 JD adapter"
 
 mkdir -p "$ADAPTER_DIR"
 cp "$PROJ_DIR/adapters/jd/shop-prices.js" "$ADAPTER_DIR/shop-prices.js"
-ok "adapter 已复制到 $ADAPTER_DIR/shop-prices.js"
+cp "$PROJ_DIR/adapters/jd/item-price.js"  "$ADAPTER_DIR/item-price.js"
+ok "adapter 已复制到 $ADAPTER_DIR/"
 
 # =============================================================================
 # Step 5: 创建启动脚本
