@@ -20,7 +20,7 @@ mac:
         - x64
 
 win:
-  icon: electron-app/assets/icon.png
+  icon: electron-app/assets/icon.ico
   target:
     - target: nsis
       arch:
@@ -31,9 +31,9 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  installerIcon: electron-app/assets/icon.png
-  uninstallerIcon: electron-app/assets/icon.png
-  installerHeaderIcon: electron-app/assets/icon.png
+  installerIcon: electron-app/assets/icon.ico
+  uninstallerIcon: electron-app/assets/icon.ico
+  installerHeaderIcon: electron-app/assets/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: JD Price Monitor
