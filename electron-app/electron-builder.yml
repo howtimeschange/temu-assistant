@@ -1,6 +1,7 @@
 appId: com.lobsterai.jd-price-monitor
 productName: JD Price Monitor
 copyright: "Copyright © 2024"
+electronVersion: "29.4.6"
 
 directories:
   app: electron-app
