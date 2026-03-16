@@ -39,6 +39,7 @@ jobs:
           npx --prefix electron-app electron-builder \
             --mac dmg \
             --arm64 \
+            --publish never \
             --config electron-app/electron-builder.yml
 
       - name: Build macOS DMG (x64)
@@ -50,6 +51,7 @@ jobs:
           npx --prefix electron-app electron-builder \
             --mac dmg \
             --x64 \
+            --publish never \
             --config electron-app/electron-builder.yml
 
       - name: Upload macOS artifacts
@@ -113,7 +115,7 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          npx --prefix electron-app electron-builder --win nsis --x64 --config electron-app/electron-builder.yml
+          npx --prefix electron-app electron-builder --win nsis --x64 --publish never --config electron-app/electron-builder.yml
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
