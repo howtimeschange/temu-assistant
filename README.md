@@ -6,113 +6,75 @@
 
 本项目使用 **[bb-browser](https://github.com/epiral/bb-browser)** 方案抓取价格，完全绕过京东反爬检测：
 
-- bb-browser 通过 Chrome 扩展在用户真实浏览器内执行 JS，使用浏览器本身的 Cookie 和网络
+- bb-browser 在用户**真实 Chrome 浏览器**内执行 JS，使用浏览器本身的 Cookie 和网络
 - 不需要任何 API Key，不会被风控拦截
 - 价格通过滚动触发懒加载，100% 准确
 
-## 项目结构
+## 快速安装
 
-```
-jd-price-monitor/
-├── cli.py                    # ✨ 交互式 CLI 入口（推荐）
-├── config.yaml               # 主配置文件
-├── main.py                   # 巡检核心逻辑（可独立运行）
-├── scrape_list.py            # 价格导出核心逻辑（可独立运行）
-├── requirements.txt          # Python 依赖
-├── crontab.example           # 定时任务示例
-├── adapters/
-│   └── jd/
-│       └── shop-prices.js    # bb-browser 适配器（复制到 ~/.bb-browser/bb-sites/jd/）
-└── src/
-    ├── config.py             # 配置加载 & 保存
-    ├── sku_fetcher.py        # 店铺 SKU 列表抓取
-    ├── price_fetcher.py      # 前台价格抓取
-    ├── checker.py            # 破价检测逻辑
-    ├── dingtalk.py           # 钉钉告警
-    └── storage.py            # 历史记录存储
-```
+> **前置条件：** Python 3.9+、Node.js 18+、Chrome 浏览器
 
-## 快速开始
-
-### 1. 前置依赖
-
-- Python 3.9+
-- Node.js 18+
-- Chrome 浏览器（已登录京东）
-
-### 2. 安装 bb-browser
-
+**macOS / Linux：**
 ```bash
-npm install -g bb-browser
+git clone https://github.com/howtimeschange/jd-price-monitor.git
+cd jd-price-monitor
+bash install.sh
+```
 
-# 启动 bb-browser daemon
+**Windows：**
+```
+# 方式一：双击 install.bat
+# 方式二：PowerShell（推荐）
+Set-ExecutionPolicy Bypass -Scope Process; .\install.ps1
+```
+
+安装脚本会自动完成：
+- 创建 Python 虚拟环境并安装所有依赖（rich、questionary、openpyxl 等）
+- 安装 / 更新 bb-browser 及社区 adapter 库
+- 部署 JD 价格抓取 adapter
+- 生成 `jd-monitor` 启动脚本
+
+## 安装后的一次性配置
+
+安装完成后，首次使用前需要完成以下步骤（之后无需重复）：
+
+**1. 启动 bb-browser daemon**（新开一个终端窗口，保持运行）
+```bash
+# macOS / Linux
 node $(npm root -g)/bb-browser/dist/daemon.js
+
+# Windows PowerShell
+node "$((npm root -g).Trim())\bb-browser\dist\daemon.js"
 ```
 
-然后在 Chrome 中安装 bb-browser 扩展：
-1. 打开 `chrome://extensions/` → 开启"开发者模式"
-2. 点击"加载已解压的扩展程序"
-3. 选择 `$(npm root -g)/bb-browser/extension` 目录
-
-### 3. 安装适配器
-
-```bash
-mkdir -p ~/.bb-browser/bb-sites/jd
-cp adapters/jd/shop-prices.js ~/.bb-browser/bb-sites/jd/
-```
-
-### 4. 开启 Chrome 远程调试
-
-启动 Chrome 时加上调试端口参数：
-
+**2. 以远程调试模式打开 Chrome**
 ```bash
 # macOS
 open -a "Google Chrome" --args --remote-debugging-port=9222
 
 # Windows
-chrome.exe --remote-debugging-port=9222
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 ```
 
-确认连接：
-```bash
-bb-browser tab list --port 9222
-```
+**3. 安装 bb-browser Chrome 扩展**（仅首次）
+1. 打开 `chrome://extensions/` → 开启"开发者模式"
+2. 点击"加载已解压的扩展程序"
+3. 路径（macOS/Linux）：`$(npm root -g)/bb-browser/extension`
+4. 路径（Windows）：运行 `npm root -g` 查看，再拼上 `\bb-browser\extension`
 
-### 5. 安装 Python 依赖
+**4. 在 Chrome 中打开京东并登录**
 
-```bash
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 6. 配置
-
-编辑 `config.yaml`，必填：
-
-```yaml
-shop:
-  shop_id: "1000462158"        # 你的店铺 ID
-  shop_name: "店铺名称"
-
-monitor:
-  price_ratio_threshold: 0.50  # 低于吊牌价 50% 时告警
-
-dingtalk:
-  webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=你的token"
-```
-
----
-
-## 使用方式
-
-### 推荐：交互式 CLI
+## 启动
 
 ```bash
-python cli.py
+# macOS / Linux
+./jd-monitor
+
+# Windows
+jd-monitor.bat   # 或双击桌面快捷方式（安装时自动创建）
 ```
 
-启动后显示主菜单，可完成所有操作：
+启动后显示交互式主菜单：
 
 ```
   JD Price Monitor  京东价格监控系统
@@ -135,24 +97,50 @@ python cli.py
 **设置菜单**支持：
 - 粘贴任意京东店铺 URL，自动解析 shop_id
 - 修改破价阈值（如输入 `50` 即 5折）
-- 配置钉钉 Webhook，支持加签 + 一键测试
+- 配置钉钉 Webhook，支持加签 + 一键测试发送
 - 修改巡检间隔
 
 **循环巡检**支持前台运行和后台进程两种模式。
 
-**定时任务**支持自动写入 crontab（macOS/Linux）或复制到剪贴板。
+**定时任务**支持自动写入 crontab（macOS/Linux）或复制到剪贴板（Windows）。
 
-### 命令行直接运行
+---
+
+## 项目结构
+
+```
+jd-price-monitor/
+├── install.sh                # 一键安装（macOS / Linux）
+├── install.bat               # 一键安装（Windows CMD）
+├── install.ps1               # 一键安装（Windows PowerShell）
+├── cli.py                    # ✨ 交互式 CLI 入口
+├── config.yaml               # 主配置文件
+├── main.py                   # 巡检核心逻辑（可独立运行）
+├── scrape_list.py            # 价格导出核心逻辑（可独立运行）
+├── requirements.txt          # Python 依赖
+├── crontab.example           # 定时任务示例
+├── adapters/
+│   └── jd/
+│       └── shop-prices.js    # bb-browser 适配器
+└── src/
+    ├── config.py             # 配置加载 & 保存
+    ├── checker.py            # 破价检测逻辑
+    ├── dingtalk.py           # 钉钉告警
+    └── storage.py            # 历史记录存储
+```
+
+## 命令行直接运行（无 CLI）
 
 ```bash
 # 导出价格 Excel
-python scrape_list.py
+venv/bin/python scrape_list.py        # macOS/Linux
+venv\Scripts\python scrape_list.py   # Windows
 
 # 单次巡检
-python main.py
+venv/bin/python main.py
 
 # 循环巡检
-python main.py --loop
+venv/bin/python main.py --loop
 ```
 
 ---
@@ -160,11 +148,11 @@ python main.py --loop
 ## 工作原理
 
 ```
-scrape_list.py
+cli.py / scrape_list.py
 │
-├── bb-browser tab list        # 找到 mall.jd.com tab
-├── bb-browser eval navigate   # 切换到目标页
-└── bb-browser site jd/shop-prices  # 在浏览器内执行 adapter
+├── bb-browser tab list          # 找到 mall.jd.com tab
+├── bb-browser eval navigate     # 切换到目标页，等待 25s
+└── bb-browser site jd/shop-prices   # 在浏览器内执行 adapter
     │
     ├── 等待价格元素渲染（最多 5s）
     ├── 分段滚动（10 步）触发懒加载价格
@@ -190,10 +178,10 @@ ASICS亚瑟士男款跑步鞋GEL-KAYANO...
 
 ## 注意事项
 
-- bb-browser daemon 和 Chrome 必须在运行状态，`scrape_list.py` / `main.py` 才能工作
-- `cookies.json` 已加入 `.gitignore`，不会被提交
+- bb-browser daemon 和 Chrome 必须保持运行，程序才能工作
 - 吊牌价来源于商品列表页的划线价；若京东未展示划线价，该 SKU 跳过检测
-- 建议在 Mac 不休眠状态下运行，或部署到服务器（需要有图形界面支持 Chrome）
+- 建议在 Mac 不休眠状态下运行，或部署到 Windows Server / Linux VPS（需要有图形界面支持 Chrome）
+- `cookies.json` 已加入 `.gitignore`，不会被提交
 
 ## License
 
