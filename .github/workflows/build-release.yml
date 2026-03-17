@@ -32,6 +32,15 @@ jobs:
       - name: Download bundled Python (arm64)
         run: bash electron-app/scripts/download-python.sh
 
+      - name: Install bb-browser dependencies (standalone)
+        run: |
+          # bb-browser 需要独立的 node_modules，否则打包后找不到依赖
+          cd electron-app/node_modules/bb-browser
+          npm install --production --no-package-lock 2>/dev/null
+          cd ../..
+          echo "Done. node_modules size:"
+          du -sh node_modules/bb-browser/node_modules
+
       - name: Build macOS DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -186,6 +195,18 @@ jobs:
           & $PIP -m pip install --upgrade pip --quiet
           & $PIP -m pip install -r requirements.txt --quiet
           & $PIP -m pip install fastapi uvicorn httpx --quiet
+
+      - name: Install bb-browser dependencies (standalone)
+        shell: pwsh
+        run: |
+          # bb-browser 需要独立的 node_modules，否则打包后找不到依赖
+          $BB_DIR = "electron-app/node_modules/bb-browser"
+          Write-Host "Installing bb-browser dependencies in $BB_DIR..."
+          Push-Location $BB_DIR
+          npm install --production --no-package-lock 2>&1
+          Pop-Location
+          Write-Host "Done. node_modules size:"
+          (Get-ChildItem "$BB_DIR/node_modules" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
 
       - name: Build Windows installer
         shell: pwsh
