@@ -225,6 +225,14 @@
             <button class="btn btn-secondary" id="btn-start-daemon">启动 Daemon</button>
           </div>
 
+          <div class="form-divider"></div>
+          <h3 class="subsection-title">自定义浏览器路径（找不到时填写）</h3>
+          <div class="form-row chrome-path-row">
+            <input type="text" id="chrome-custom-path" placeholder="留空则自动检测，例: C:\Program Files\Google\Chrome\Application\chrome.exe" />
+            <button class="btn btn-secondary" id="btn-browse-chrome">浏览…</button>
+            <button class="btn btn-secondary" id="btn-save-chrome-path">保存</button>
+          </div>
+
           <div class="hint-box">
             <p>💡 点击"启动 Chrome"会自动：</p>
             <ol>
@@ -283,23 +291,37 @@
 
 
       <!-- AI 助手面板 -->
-      <section class="panel" id="panel-ai">
-        <div class="panel-header"><h2>🤖 AI 助手</h2></div>
-        <div class="form-section" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
-          <div id="ai-key-bar" style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-            <input type="password" id="ai-api-key" placeholder="MiniMax API Key（sk-...）" style="flex:1;font-size:12px" />
-            <button class="btn btn-secondary" id="btn-ai-save-key" style="white-space:nowrap">保存</button>
+      <section class="panel ai-panel" id="panel-ai">
+        <div class="panel-header">
+          <h2>🤖 AI 助手</h2>
+          <div class="ai-key-bar">
+            <input type="password" id="ai-api-key" placeholder="MiniMax API Key（sk-...）" />
+            <button class="btn btn-secondary" id="btn-ai-save-key">保存 Key</button>
           </div>
-          <div id="ai-messages" style="flex:1;overflow-y:auto;background:#0d1117;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.6"></div>
-          <div style="display:flex;gap:8px">
-            <textarea id="ai-input" placeholder="问我任何问题，例如：为什么抓取失败？如何配置钉钉？" rows="3" style="flex:1;resize:none;font-size:13px"></textarea>
-            <button class="btn btn-primary" id="btn-ai-send" style="align-self:flex-end">发送</button>
+        </div>
+
+        <div class="ai-body">
+          <div class="ai-messages" id="ai-messages">
+            <div class="ai-welcome">
+              <div class="ai-welcome-icon">🤖</div>
+              <p>你好！我是京东价格监控助手。</p>
+              <p class="ai-welcome-sub">可以帮你排查抓取问题、分析巡检结果、修改配置等。</p>
+            </div>
           </div>
-          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+
+          <div class="ai-chips">
             <button class="btn-chip" data-prompt="帮我检查为什么抓取失败">抓取失败排查</button>
             <button class="btn-chip" data-prompt="读取最新巡检结果并分析">分析巡检结果</button>
             <button class="btn-chip" data-prompt="帮我检查当前配置是否正确">检查配置</button>
             <button class="btn-chip" data-prompt="如何配置钉钉通知？">配置钉钉</button>
+          </div>
+
+          <div class="ai-input-row">
+            <textarea id="ai-input" placeholder="问我任何问题，例如：为什么抓取失败？如何配置钉钉？" rows="2"></textarea>
+            <button class="btn btn-primary ai-send-btn" id="btn-ai-send">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-5 6 5 6-12-6z" fill="currentColor"/></svg>
+              发送
+            </button>
           </div>
         </div>
       </section>

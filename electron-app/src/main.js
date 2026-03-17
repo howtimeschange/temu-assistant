@@ -21,6 +21,9 @@ function getPythonBin() {
     const unixBin = path.join(process.resourcesPath, 'python', 'bin', 'python3')
     return process.platform === 'win32' ? winBin : unixBin
   }
+  // dev: prefer project venv if it exists
+  const venvPy = path.join(__dirname, '..', '..', 'venv', 'bin', 'python3')
+  if (fs.existsSync(venvPy)) return venvPy
   return process.platform === 'win32' ? 'python' : 'python3'
 }
 
@@ -91,6 +94,9 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 
+  // 启动 Backend server（AI 助手 + FastAPI）
+  await startBackend()
+
   // 自动启动 Chrome（调试模式）
   log('🚀 正在自动启动 Chrome 调试模式…')
   const chromeResult = await launchChrome()
@@ -104,9 +110,72 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
-  // On mac: stop daemon too
+  // On mac: stop daemon and backend too
   stopBbDaemon()
+  stopBackend()
 })
+
+// ── Backend server (FastAPI) ──────────────────────────────────────────────────
+let backendProcess = null
+const BACKEND_PORT = 7788
+
+function getBackendScript() {
+  if (isPkg()) {
+    return path.join(process.resourcesPath, 'backend', 'server.py')
+  }
+  return path.join(__dirname, '..', 'backend', 'server.py')
+}
+
+async function startBackend() {
+  // 如果已经在监听就跳过
+  if (await probeTcp(BACKEND_PORT)) {
+    log(`✅ Backend server 已在端口 ${BACKEND_PORT} 运行`)
+    return
+  }
+
+  const pythonBin = getPythonBin()
+  const serverScript = getBackendScript()
+
+  if (!fs.existsSync(serverScript)) {
+    log(`⚠️  Backend server 脚本未找到：${serverScript}`)
+    return
+  }
+
+  log(`🚀 启动 Backend server: ${pythonBin} ${serverScript} ${BACKEND_PORT}`)
+  backendProcess = spawn(pythonBin, [serverScript, String(BACKEND_PORT)], {
+    cwd: getPythonScriptsDir(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+  })
+
+  backendProcess.stdout.on('data', d =>
+    d.toString('utf8').split('\n').filter(l => l.trim()).forEach(l => log(`[backend] ${l}`))
+  )
+  backendProcess.stderr.on('data', d =>
+    d.toString('utf8').split('\n').filter(l => l.trim()).forEach(l => log(`[backend] ${l}`))
+  )
+  backendProcess.on('exit', code => {
+    log(`[backend] 进程退出，code=${code}`)
+    backendProcess = null
+  })
+
+  // 等待端口就绪（最多 10 秒）
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 500))
+    if (await probeTcp(BACKEND_PORT)) {
+      log(`✅ Backend server 已就绪（端口 ${BACKEND_PORT}）`)
+      return
+    }
+  }
+  log(`⚠️  Backend server 启动超时，AI 助手功能可能不可用`)
+}
+
+function stopBackend() {
+  if (backendProcess) {
+    backendProcess.kill()
+    backendProcess = null
+  }
+}
 
 // ── bb-browser daemon ─────────────────────────────────────────────────────────
 let bbDaemonProcess = null
@@ -198,18 +267,54 @@ async function checkChromeCdp(port = 9222) {
   return ok
 }
 
-async function launchChrome(port = 9222) {
-  const CHROME_PATHS = [
+async function launchChrome(port = 9222, customPath = '') {
+  const isWin = process.platform === 'win32'
+  const CHROME_PATHS = isWin ? [
+    // Windows 常见安装路径
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.LOCALAPPDATA
+      ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
+      : '',
+    process.env.PROGRAMFILES
+      ? `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`
+      : '',
+    // Edge 作为备选
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  ].filter(Boolean) : [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
   ]
 
+  // 优先用自定义路径
   let chromePath = null
-  for (const p of CHROME_PATHS) {
-    if (fs.existsSync(p)) { chromePath = p; break }
+  if (customPath && fs.existsSync(customPath)) {
+    chromePath = customPath
+  } else {
+    for (const p of CHROME_PATHS) {
+      if (fs.existsSync(p)) { chromePath = p; break }
+    }
   }
+
+  // 找不到 → 弹出文件选择对话框
   if (!chromePath) {
-    return { ok: false, msg: 'Chrome not found. Please install Google Chrome.' }
+    const filters = isWin
+      ? [{ name: 'Executable', extensions: ['exe'] }]
+      : [{ name: 'Application', extensions: ['app', ''] }]
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '找不到 Chrome，请手动选择浏览器可执行文件',
+      buttonLabel: '选择',
+      filters,
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths.length) {
+      return { ok: false, msg: '未选择浏览器路径，已取消' }
+    }
+    chromePath = result.filePaths[0]
+    // 保存到配置，下次直接用
+    saveChromePath(chromePath)
+    log(`✅ 已选择浏览器：${chromePath}`)
   }
 
   // Check if Chrome is running WITHOUT CDP — if so, quit it first
@@ -217,19 +322,24 @@ async function launchChrome(port = 9222) {
   if (!alreadyListening) {
     try {
       // Gracefully quit Chrome so we can re-launch with CDP flag
-      execSync(`osascript -e 'quit app "Google Chrome"'`, { timeout: 5000 })
+      if (isWin) {
+        execSync('taskkill /F /IM chrome.exe /T', { timeout: 5000 })
+      } else {
+        execSync(`osascript -e 'quit app "Google Chrome"'`, { timeout: 5000 })
+      }
       await new Promise(r => setTimeout(r, 1500))
     } catch (_) {
       // Chrome wasn't running — fine
     }
 
     log(`Launching Chrome with --remote-debugging-port=${port}`)
-    spawn(chromePath, [
+    const chromeProc = spawn(chromePath, [
       `--remote-debugging-port=${port}`,
       '--no-first-run',
       '--no-default-browser-check',
       'https://www.jd.com',
-    ], { detached: true, stdio: 'ignore' }).unref()
+    ], { detached: !isWin, stdio: 'ignore' })
+    if (!isWin) chromeProc.unref()
 
     // Wait for CDP to become available
     for (let i = 0; i < 20; i++) {
@@ -253,7 +363,8 @@ async function launchChrome(port = 9222) {
       })
       const hasJd = tabs.some(t => t.type === 'page' && t.url && t.url.includes('jd.com'))
       if (!hasJd) {
-        spawn(chromePath, ['https://www.jd.com'], { detached: true, stdio: 'ignore' }).unref()
+        const p2 = spawn(chromePath, ['https://www.jd.com'], { detached: !isWin, stdio: 'ignore' })
+        if (!isWin) p2.unref()
         log('已在 Chrome 中打开京东页面')
       }
     } catch (_) {}
@@ -329,6 +440,18 @@ function writeConfig(cfg) {
   fs.writeFileSync(getConfigPath(), yaml.dump(cfg), 'utf8')
 }
 
+// Chrome 路径持久化（存在 config.yaml 的 chrome_path 字段）
+function loadChromePath() {
+  try { return readConfig().chrome_path || '' } catch { return '' }
+}
+function saveChromePath(p) {
+  try {
+    const cfg = readConfig()
+    cfg.chrome_path = p
+    writeConfig(cfg)
+  } catch (_) {}
+}
+
 // ── Logging helper ────────────────────────────────────────────────────────────
 function log(msg) {
   const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false })
@@ -394,8 +517,32 @@ ipcMain.handle('start-daemon', async () => {
   return await startBbDaemon()
 })
 
-ipcMain.handle('launch-chrome', async () => {
-  return await launchChrome()
+ipcMain.handle('launch-chrome', async (_, customPath) => {
+  const saved = customPath || loadChromePath()
+  return await launchChrome(9222, saved)
+})
+
+ipcMain.handle('get-chrome-path', async () => {
+  return { path: loadChromePath() }
+})
+
+ipcMain.handle('save-chrome-path', async (_, p) => {
+  saveChromePath(p)
+  return { ok: true }
+})
+
+ipcMain.handle('browse-chrome-path', async () => {
+  const isWin = process.platform === 'win32'
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择 Chrome / Edge 可执行文件',
+    buttonLabel: '选择',
+    filters: isWin
+      ? [{ name: 'Executable', extensions: ['exe'] }]
+      : [{ name: 'Application', extensions: ['app', ''] }],
+    properties: ['openFile'],
+  })
+  if (result.canceled || !result.filePaths.length) return { path: '' }
+  return { path: result.filePaths[0] }
 })
 
 ipcMain.handle('check-chrome', async () => {

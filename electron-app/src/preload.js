@@ -8,8 +8,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Daemon & Chrome
   startDaemon: () => ipcRenderer.invoke('start-daemon'),
-  launchChrome: () => ipcRenderer.invoke('launch-chrome'),
+  launchChrome: (customPath) => ipcRenderer.invoke('launch-chrome', customPath),
   checkChrome: () => ipcRenderer.invoke('check-chrome'),
+  getChromePath: () => ipcRenderer.invoke('get-chrome-path'),
+  saveChromePath: (p) => ipcRenderer.invoke('save-chrome-path', p),
+  browseChromePath: () => ipcRenderer.invoke('browse-chrome-path'),
 
   // Scrape
   runOnce: () => ipcRenderer.invoke('run-once'),

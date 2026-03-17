@@ -23,15 +23,19 @@ const $indChrome    = document.getElementById('ind-chrome')
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 document.querySelectorAll('.nav-item').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'))
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'))
     btn.classList.add('active')
     const panelId = btn.dataset.panel
     document.getElementById(panelId).classList.add('active')
     if (panelId === 'panel-files') refreshFiles()
-    if (panelId === 'panel-chrome') refreshChromeStatus()
     if (panelId === 'panel-cron') refreshCron()
+    if (panelId === 'panel-chrome') {
+      refreshChromeStatus()
+      const r = await api.getChromePath()
+      if (r.path) document.getElementById('chrome-custom-path').value = r.path
+    }
   })
 })
 
@@ -267,7 +271,8 @@ async function refreshChromeStatus() {
 
 document.getElementById('btn-launch-chrome').addEventListener('click', async () => {
   appendLog('[Chrome] 正在启动 Chrome (CDP)…')
-  const r = await api.launchChrome()
+  const customPath = document.getElementById('chrome-custom-path').value.trim()
+  const r = await api.launchChrome(customPath || undefined)
   appendLog(`[Chrome] ${r.msg}`)
   await refreshChromeStatus()
 })
@@ -279,6 +284,18 @@ document.getElementById('btn-start-daemon').addEventListener('click', async () =
   const r = await api.startDaemon()
   appendLog(`[Daemon] ${r.msg}`)
   await refreshChromeStatus()
+})
+
+// 自定义 Chrome 路径
+document.getElementById('btn-browse-chrome').addEventListener('click', async () => {
+  const r = await api.browseChromePath()
+  if (r.path) document.getElementById('chrome-custom-path').value = r.path
+})
+
+document.getElementById('btn-save-chrome-path').addEventListener('click', async () => {
+  const p = document.getElementById('chrome-custom-path').value.trim()
+  await api.saveChromePath(p)
+  appendLog(`[Chrome] 自定义路径已保存：${p || '（已清空，恢复自动检测）'}`)
 })
 
 // ── Files panel ───────────────────────────────────────────────────────────────
@@ -437,17 +454,19 @@ document.querySelectorAll('#panel-ai .btn-chip').forEach(btn => {
 })
 
 function appendAiMsg(role, content, streaming = false) {
+  // 清除欢迎占位
+  const welcome = aiMessages.querySelector('.ai-welcome')
+  if (welcome) welcome.remove()
+
   const div = document.createElement('div')
-  div.style.cssText = `margin-bottom:12px;padding:8px 12px;border-radius:8px;${
-    role === 'user'
-      ? 'background:#1a2332;text-align:right;color:#7dd3fc'
-      : 'background:#161b22;color:#e6edf3'
-  }`
-  div.dataset.role = role
+  div.className = `ai-msg ai-msg-${role === 'user' ? 'user' : 'bot'}`
   if (streaming) div.id = 'ai-streaming'
-  div.innerHTML = role === 'user'
-    ? `<strong>你</strong><br>${content.replace(/\n/g, '<br>')}`
-    : `<strong>🤖 助手</strong><br><span class="ai-content">${content}</span>`
+
+  if (role === 'user') {
+    div.innerHTML = `<div class="ai-bubble">${content.replace(/\n/g, '<br>')}</div>`
+  } else {
+    div.innerHTML = `<div class="ai-label">🤖 助手</div><div class="ai-bubble"><span class="ai-content">${content}</span></div>`
+  }
   aiMessages.appendChild(div)
   aiMessages.scrollTop = aiMessages.scrollHeight
   return div
