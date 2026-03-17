@@ -56,40 +56,73 @@ jobs:
 
       - name: Inject fix script into DMGs
         run: |
-          SCRIPT="electron-app/assets/fix-mac-quarantine.command"
-          chmod +x "$SCRIPT"
-          for DMG in electron-app/dist/*.dmg; do
-            echo "Injecting fix script into $DMG..."
-            # Mount DMG read-only to get volume name
-            MOUNT_INFO=$(hdiutil attach "$DMG" -readonly -noverify -noautoopen 2>&1)
-            VOLUME=$(echo "$MOUNT_INFO" | grep -oE '/Volumes/[^\n]+' | tail -1)
-            hdiutil detach "$VOLUME" -quiet 2>/dev/null || true
+          python3 - <<'PYEOF'
+          import os, shutil, subprocess, glob, tempfile
 
-            # Create a new writable DMG with the fix script added
-            BASENAME=$(basename "$DMG" .dmg)
-            TMPDIR_DMG=$(mktemp -d)
-            hdiutil attach "$DMG" -readonly -noverify -noautoopen -mountpoint "$TMPDIR_DMG/src" 2>/dev/null
-            cp -R "$TMPDIR_DMG/src/." "$TMPDIR_DMG/rw/"  2>/dev/null || mkdir -p "$TMPDIR_DMG/rw"
-            hdiutil attach "$DMG" -readonly -noverify -noautoopen -mountpoint "$TMPDIR_DMG/rw_src" 2>/dev/null || true
-            # Copy contents to staging
-            STAGING="$TMPDIR_DMG/staging"
-            mkdir -p "$STAGING"
-            cp -R "$TMPDIR_DMG/rw_src/." "$STAGING/" 2>/dev/null || cp -R "$TMPDIR_DMG/src/." "$STAGING/"
-            hdiutil detach "$TMPDIR_DMG/rw_src" -quiet 2>/dev/null || true
-            hdiutil detach "$TMPDIR_DMG/src" -quiet 2>/dev/null || true
-            # Add fix script to staging
-            cp "$SCRIPT" "$STAGING/🔧 首次打开必读 - 修复已损坏.command"
-            chmod +x "$STAGING/🔧 首次打开必读 - 修复已损坏.command"
-            # Repack into new DMG
-            NEW_DMG="electron-app/dist/${BASENAME}-new.dmg"
-            hdiutil create -volname "JD Price Monitor" \
-              -srcfolder "$STAGING" \
-              -ov -format UDZO \
-              "$NEW_DMG"
-            mv "$NEW_DMG" "$DMG"
-            rm -rf "$TMPDIR_DMG"
-            echo "Done: $DMG"
-          done
+          script_src = "electron-app/assets/fix-mac-quarantine.command"
+          script_dst_name = "🔧 首次打开必读 - 修复已损坏.command"
+
+          dmgs = glob.glob("electron-app/dist/*.dmg")
+          print(f"Found DMGs: {dmgs}")
+
+          for dmg in dmgs:
+              print(f"\nProcessing: {dmg}")
+              with tempfile.TemporaryDirectory() as tmpdir:
+                  mnt = os.path.join(tmpdir, "mnt")
+                  staging = os.path.join(tmpdir, "staging")
+                  os.makedirs(mnt)
+                  os.makedirs(staging)
+
+                  # Mount
+                  r = subprocess.run(
+                      ["hdiutil", "attach", dmg, "-readonly", "-noverify",
+                       "-noautoopen", "-mountpoint", mnt],
+                      capture_output=True, text=True
+                  )
+                  if r.returncode != 0:
+                      print(f"  Mount failed: {r.stderr}")
+                      continue
+
+                  # Copy contents to staging
+                  for item in os.listdir(mnt):
+                      src = os.path.join(mnt, item)
+                      dst = os.path.join(staging, item)
+                      if os.path.islink(src):
+                          link_target = os.readlink(src)
+                          os.symlink(link_target, dst)
+                      elif os.path.isdir(src):
+                          shutil.copytree(src, dst, symlinks=True)
+                      else:
+                          shutil.copy2(src, dst)
+
+                  # Unmount
+                  subprocess.run(["hdiutil", "detach", mnt, "-quiet"],
+                                 capture_output=True)
+
+                  # Add fix script
+                  fix_dst = os.path.join(staging, script_dst_name)
+                  shutil.copy2(script_src, fix_dst)
+                  os.chmod(fix_dst, 0o755)
+                  print(f"  Added fix script: {script_dst_name}")
+
+                  # Repack
+                  new_dmg = dmg + ".new"
+                  r = subprocess.run(
+                      ["hdiutil", "create",
+                       "-volname", "JD Price Monitor",
+                       "-srcfolder", staging,
+                       "-ov", "-format", "UDZO",
+                       new_dmg],
+                      capture_output=True, text=True
+                  )
+                  if r.returncode != 0:
+                      print(f"  Create failed: {r.stderr}")
+                      continue
+
+                  os.replace(new_dmg, dmg)
+                  print(f"  Done: {dmg}")
+
+          PYEOF
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
