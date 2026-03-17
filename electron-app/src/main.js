@@ -145,7 +145,13 @@ async function startBackend() {
   backendProcess = spawn(pythonBin, [serverScript, String(BACKEND_PORT)], {
     cwd: getPythonScriptsDir(),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
+      // 告知 server.py 内嵌资源根路径，用于定位 python / python-scripts 等目录
+      ELECTRON_RESOURCES_PATH: isPkg() ? process.resourcesPath : '',
+    },
   })
 
   backendProcess.stdout.on('data', d =>
@@ -626,6 +632,7 @@ ipcMain.handle('open-file', async (_, filePath) => {
 
 // ── Cron task management ───────────────────────────────────────────────────────
 function parseCrontab() {
+  if (process.platform === 'win32') return []
   try {
     const out = require('child_process').execSync('crontab -l 2>/dev/null || true', { encoding: 'utf8' })
     const lines = out.split('\n').filter(l => l.trim() && !l.trim().startsWith('#'))
@@ -634,6 +641,7 @@ function parseCrontab() {
 }
 
 function writeCrontab(lines) {
+  if (process.platform === 'win32') throw new Error('Windows 不支持 crontab')
   const content = lines.join('\n') + '\n'
   const tmpFile = path.join(require('os').tmpdir(), 'jd_cron_tmp')
   fs.writeFileSync(tmpFile, content)

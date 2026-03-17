@@ -506,8 +506,14 @@ async function sendAiMessage(text) {
     })
 
     if (!resp.ok) {
-      const err = await resp.json()
-      contentSpan.innerHTML = `❌ ${err.error || '请求失败'}`
+      let errMsg = `HTTP ${resp.status}`
+      try {
+        const err = await resp.json()
+        errMsg = err.error || errMsg
+      } catch (_) {
+        try { errMsg = (await resp.text()).slice(0, 120) } catch (_) {}
+      }
+      contentSpan.innerHTML = `❌ ${errMsg}`
       btnAiSend.disabled = false
       return
     }

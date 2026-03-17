@@ -355,7 +355,12 @@ def loop_status():
 
 
 # ── Cron 管理 API ─────────────────────────────────────────────────────────────
+_IS_WINDOWS = os.name == "nt"
+
+
 def _get_cron_lines():
+    if _IS_WINDOWS:
+        return None, None  # crontab 在 Windows 不可用
     try:
         r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         if r.returncode != 0:
@@ -370,6 +375,8 @@ def _get_cron_lines():
 
 @app.get("/api/cron/list")
 def cron_list():
+    if _IS_WINDOWS:
+        return {"tasks": [], "unsupported": True, "msg": "定时任务在 Windows 上请使用「任务计划程序」"}
     all_lines, related = _get_cron_lines()
     if all_lines is None:
         return {"error": "crontab 不可用"}
@@ -387,6 +394,8 @@ def cron_list():
 
 @app.post("/api/cron/add")
 async def cron_add(body: dict):
+    if _IS_WINDOWS:
+        return JSONResponse({"error": "定时任务在 Windows 上暂不支持，请使用系统「任务计划程序」"}, status_code=400)
     expr = body.get("expr", "")
     if len(expr.split()) != 5:
         return JSONResponse({"error": "cron 表达式需要5段"}, status_code=400)
@@ -413,6 +422,8 @@ async def cron_add(body: dict):
 
 @app.delete("/api/cron/{line_index}")
 async def cron_delete(line_index: int):
+    if _IS_WINDOWS:
+        return JSONResponse({"error": "定时任务在 Windows 上暂不支持"}, status_code=400)
     all_lines, _ = _get_cron_lines()
     if all_lines is None:
         return JSONResponse({"error": "crontab 不可用"}, status_code=500)
@@ -430,18 +441,23 @@ async def cron_delete(line_index: int):
 def _find_python() -> str:
     """找到可用的 Python 解释器（优先内嵌）"""
     # 1. 内嵌 standalone python（打包后）
+    # electron-builder.yml: from electron-app/resources/python → to python
+    # 打包后路径：<resourcesPath>/python/bin/python3 (macOS/Linux)
+    #             <resourcesPath>/python/python.exe   (Windows)
     resources = os.environ.get("ELECTRON_RESOURCES_PATH", "")
     if resources:
-        embedded = Path(resources) / "resources" / "python-standalone" / "bin" / "python3"
+        win_bin  = Path(resources) / "python" / "python.exe"
+        unix_bin = Path(resources) / "python" / "bin" / "python3"
+        embedded = win_bin if os.name == "nt" else unix_bin
         if embedded.exists():
             return str(embedded)
     # 2. 项目 venv
-    venv_py = _PROJECT_ROOT / "venv" / "bin" / "python"
+    venv_py = _PROJECT_ROOT / "venv" / "bin" / "python3"
     if venv_py.exists():
         return str(venv_py)
     # 3. 系统 Python
     import shutil
-    return shutil.which("python3") or "python3"
+    return shutil.which("python3") or shutil.which("python") or "python3"
 
 
 @app.get("/api/status")
