@@ -1,5 +1,5 @@
 """
-轻量 AI Agent — 接入 MiniMax M2.1（兼容 OpenAI 格式）
+轻量 AI Agent — 接入 MiniMax M2.5（兼容 OpenAI 格式）
 工具集：读日志、读配置、写配置、检查状态、读巡检结果
 """
 import json
@@ -12,7 +12,7 @@ import httpx
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 MINIMAX_API_BASE = "https://api.minimaxi.com/v1"
-DEFAULT_MODEL = "MiniMax-M2.1"
+DEFAULT_MODEL = "MiniMax-M2.5"
 
 SYSTEM_PROMPT = """你是「京东价格监控助手」，内嵌在 JD Price Monitor 桌面应用中。
 

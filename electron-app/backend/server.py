@@ -19,18 +19,35 @@ _APP_DIR = _HERE.parent          # electron-app/
 _PROJECT_ROOT = _APP_DIR.parent  # jd-price-monitor/
 
 # 支持打包后的路径（extraResources 里）
+# 打包后结构：
+#   resources/backend/server.py         ← _HERE
+#   resources/python-scripts/           ← 项目脚本（main.py / src/ 等）
+#   resources/python/                   ← 内嵌 Python
 if not (_PROJECT_ROOT / "config.yaml").exists():
-    # 可能在 resources 里
-    _resources = Path(os.environ.get("ELECTRON_RESOURCES_PATH", "")) / "resources" / "project"
-    if (_resources / "config.yaml").exists():
-        _PROJECT_ROOT = _resources
+    # 尝试打包后的 python-scripts 目录
+    _pkg_scripts = _HERE.parent / "python-scripts"  # resources/python-scripts
+    if (_pkg_scripts / "config.yaml").exists():
+        _PROJECT_ROOT = _pkg_scripts
+    else:
+        # 旧兜底路径
+        _resources = Path(os.environ.get("ELECTRON_RESOURCES_PATH", "")) / "resources" / "project"
+        if (_resources / "config.yaml").exists():
+            _PROJECT_ROOT = _resources
 
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
+
+# AI Agent（模块级 import，失败时给出明确错误而非 500 HTML）
+try:
+    from src.ai_agent import run_agent_stream as _run_agent_stream
+    _AI_IMPORT_ERROR = None
+except Exception as _e:
+    _run_agent_stream = None  # type: ignore
+    _AI_IMPORT_ERROR = str(_e)
 
 app = FastAPI(title="JD Price Monitor API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -436,12 +453,14 @@ def status():
         "loop_running": _loop_running,
         "export_running": _export_running,
         "check_running": _check_running,
+        "ai_ready": _run_agent_stream is not None,
+        "ai_error": _AI_IMPORT_ERROR,
     }
 
 
 # ── AI Agent ──────────────────────────────────────────────────────────────────
 _ai_api_key: str = ""
-_ai_model: str = "MiniMax-M2.1"
+_ai_model: str = "MiniMax-M2.5"
 
 @app.get("/api/ai/config")
 def get_ai_config():
@@ -459,8 +478,12 @@ async def set_ai_config(body: dict):
 @app.post("/api/ai/chat")
 async def ai_chat(body: dict):
     """流式 SSE 聊天端点"""
-    from fastapi.responses import StreamingResponse
-    from src.ai_agent import run_agent_stream
+    # 检查 AI 模块是否加载成功
+    if _AI_IMPORT_ERROR:
+        return JSONResponse(
+            {"error": f"AI 模块加载失败：{_AI_IMPORT_ERROR}"},
+            status_code=500
+        )
 
     api_key = body.get("api_key") or _ai_api_key
     if not api_key:
@@ -471,8 +494,7 @@ async def ai_chat(body: dict):
 
     async def event_stream():
         try:
-            async for chunk in run_agent_stream(messages, api_key, _PROJECT_ROOT, model):
-                # SSE 格式
+            async for chunk in _run_agent_stream(messages, api_key, _PROJECT_ROOT, model):
                 data = json.dumps({"text": chunk}, ensure_ascii=False)
                 yield f"data: {data}\n\n"
         except Exception as e:
