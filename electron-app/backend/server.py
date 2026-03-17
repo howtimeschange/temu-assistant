@@ -439,6 +439,53 @@ def status():
     }
 
 
+# ── AI Agent ──────────────────────────────────────────────────────────────────
+_ai_api_key: str = ""
+_ai_model: str = "MiniMax-M2.1"
+
+@app.get("/api/ai/config")
+def get_ai_config():
+    return {"api_key": "***" if _ai_api_key else "", "model": _ai_model, "configured": bool(_ai_api_key)}
+
+@app.post("/api/ai/config")
+async def set_ai_config(body: dict):
+    global _ai_api_key, _ai_model
+    if body.get("api_key"):
+        _ai_api_key = body["api_key"]
+    if body.get("model"):
+        _ai_model = body["model"]
+    return {"ok": True}
+
+@app.post("/api/ai/chat")
+async def ai_chat(body: dict):
+    """流式 SSE 聊天端点"""
+    from fastapi.responses import StreamingResponse
+    from src.ai_agent import run_agent_stream
+
+    api_key = body.get("api_key") or _ai_api_key
+    if not api_key:
+        return JSONResponse({"error": "未配置 API Key，请在设置中填写 MiniMax API Key"}, status_code=400)
+
+    messages = body.get("messages", [])
+    model = body.get("model") or _ai_model
+
+    async def event_stream():
+        try:
+            async for chunk in run_agent_stream(messages, api_key, _PROJECT_ROOT, model):
+                # SSE 格式
+                data = json.dumps({"text": chunk}, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ── 启动 ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 7788

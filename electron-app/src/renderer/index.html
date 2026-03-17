@@ -53,6 +53,10 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3.5l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           定时任务
         </button>
+        <button class="nav-item" data-panel="panel-ai">
+          <span class="nav-icon">🤖</span>
+          <span class="nav-label">AI 助手</span>
+        </button>
       </nav>
     </aside>
 
@@ -281,5 +285,27 @@
   </div>
 
   <script src="app.js"></script>
+      <!-- AI 助手面板 -->
+      <section class="panel" id="panel-ai">
+        <div class="panel-header"><h2>🤖 AI 助手</h2></div>
+        <div class="form-section" style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
+          <div id="ai-key-bar" style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+            <input type="password" id="ai-api-key" placeholder="MiniMax API Key（sk-...）" style="flex:1;font-size:12px" />
+            <button class="btn btn-secondary" id="btn-ai-save-key" style="white-space:nowrap">保存</button>
+          </div>
+          <div id="ai-messages" style="flex:1;overflow-y:auto;background:#0d1117;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.6"></div>
+          <div style="display:flex;gap:8px">
+            <textarea id="ai-input" placeholder="问我任何问题，例如：为什么抓取失败？如何配置钉钉？" rows="3" style="flex:1;resize:none;font-size:13px"></textarea>
+            <button class="btn btn-primary" id="btn-ai-send" style="align-self:flex-end">发送</button>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn-chip" data-prompt="帮我检查为什么抓取失败">抓取失败排查</button>
+            <button class="btn-chip" data-prompt="读取最新巡检结果并分析">分析巡检结果</button>
+            <button class="btn-chip" data-prompt="帮我检查当前配置是否正确">检查配置</button>
+            <button class="btn-chip" data-prompt="如何配置钉钉通知？">配置钉钉</button>
+          </div>
+        </div>
+      </section>
+
 </body>
 </html>

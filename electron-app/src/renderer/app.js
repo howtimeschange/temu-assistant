@@ -401,3 +401,142 @@ function showToast(msg, durationMs = 2500) {
   clearTimeout(toast._timer)
   toast._timer = setTimeout(() => { toast.style.opacity = '0' }, durationMs)
 }
+
+// ── AI 助手 ────────────────────────────────────────────────────────────────
+const aiMessages = document.getElementById('ai-messages')
+const aiInput = document.getElementById('ai-input')
+const btnAiSend = document.getElementById('btn-ai-send')
+const btnAiSaveKey = document.getElementById('btn-ai-save-key')
+const aiApiKeyInput = document.getElementById('ai-api-key')
+
+let aiHistory = []
+let aiApiKey = localStorage.getItem('ai_api_key') || ''
+if (aiApiKey) aiApiKeyInput.value = '••••••••'
+
+// 保存 API Key
+btnAiSaveKey.addEventListener('click', async () => {
+  const key = aiApiKeyInput.value.trim()
+  if (!key || key === '••••••••') return
+  aiApiKey = key
+  localStorage.setItem('ai_api_key', key)
+  await fetch('http://127.0.0.1:7788/api/ai/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: key }),
+  })
+  aiApiKeyInput.value = '••••••••'
+  showToast('API Key 已保存')
+})
+
+// 快捷提示词
+document.querySelectorAll('#panel-ai .btn-chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    aiInput.value = btn.dataset.prompt
+    aiInput.focus()
+  })
+})
+
+function appendAiMsg(role, content, streaming = false) {
+  const div = document.createElement('div')
+  div.style.cssText = `margin-bottom:12px;padding:8px 12px;border-radius:8px;${
+    role === 'user'
+      ? 'background:#1a2332;text-align:right;color:#7dd3fc'
+      : 'background:#161b22;color:#e6edf3'
+  }`
+  div.dataset.role = role
+  if (streaming) div.id = 'ai-streaming'
+  div.innerHTML = role === 'user'
+    ? `<strong>你</strong><br>${content.replace(/\n/g, '<br>')}`
+    : `<strong>🤖 助手</strong><br><span class="ai-content">${content}</span>`
+  aiMessages.appendChild(div)
+  aiMessages.scrollTop = aiMessages.scrollHeight
+  return div
+}
+
+function renderMarkdown(text) {
+  // 简单 markdown：代码块、加粗、换行
+  return text
+    .replace(/```([\s\S]*?)```/g, '<pre style="background:#0d1117;padding:8px;border-radius:4px;overflow-x:auto;font-size:12px">$1</pre>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>')
+}
+
+async function sendAiMessage(text) {
+  if (!text.trim()) return
+  if (!aiApiKey) {
+    showToast('请先填写 MiniMax API Key')
+    document.getElementById('panel-ai').querySelector('#ai-api-key').focus()
+    return
+  }
+
+  appendAiMsg('user', text)
+  aiHistory.push({ role: 'user', content: text })
+  aiInput.value = ''
+  btnAiSend.disabled = true
+
+  const streamDiv = appendAiMsg('assistant', '', true)
+  const contentSpan = streamDiv.querySelector('.ai-content')
+  let fullText = ''
+
+  try {
+    const resp = await fetch('http://127.0.0.1:7788/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: aiHistory, api_key: aiApiKey }),
+    })
+
+    if (!resp.ok) {
+      const err = await resp.json()
+      contentSpan.innerHTML = `❌ ${err.error || '请求失败'}`
+      btnAiSend.disabled = false
+      return
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (data === '[DONE]') break
+        try {
+          const obj = JSON.parse(data)
+          if (obj.text) {
+            fullText += obj.text
+            contentSpan.innerHTML = renderMarkdown(fullText)
+            aiMessages.scrollTop = aiMessages.scrollHeight
+          }
+        } catch (_) {}
+      }
+    }
+
+    aiHistory.push({ role: 'assistant', content: fullText })
+  } catch (e) {
+    contentSpan.innerHTML = `❌ 连接失败：${e.message}`
+  }
+
+  streamDiv.removeAttribute('id')
+  btnAiSend.disabled = false
+}
+
+btnAiSend.addEventListener('click', () => sendAiMessage(aiInput.value))
+aiInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendAiMessage(aiInput.value)
+})
+
+// 初始化时同步已保存的 key 到后端
+if (aiApiKey) {
+  fetch('http://127.0.0.1:7788/api/ai/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: aiApiKey }),
+  }).catch(() => {})
+}
