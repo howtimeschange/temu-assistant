@@ -57,10 +57,8 @@ jobs:
         run: |
           # Download x64 python
           ARCH=x86_64 bash electron-app/scripts/download-python.sh || true
-          # x64 build 也需要 bb-browser 依赖（arm64 步骤已安装，但 x64 是独立 build）
-          cd electron-app/node_modules/bb-browser
-          npm install --production --no-package-lock 2>/dev/null || true
-          cd ../..
+          # x64 build 也需要 bb-browser 依赖（用子 shell 避免 cd 影响后续命令）
+          (cd electron-app/node_modules/bb-browser && npm install --production --no-package-lock 2>/dev/null || true)
           npx --prefix electron-app electron-builder \
             --mac dmg \
             --x64 \
