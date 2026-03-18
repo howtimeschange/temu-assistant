@@ -100,11 +100,54 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
+// ── Adapter 安装 ──────────────────────────────────────────────────────────────
+// bb-browser 的 `site` 命令只认 ~/.bb-browser/sites/ 目录。
+// 打包后 adapters 在 resources/python-scripts/adapters/，需要在启动时 copy 过去。
+function installAdapters() {
+  try {
+    const os = require('os')
+    const bbSitesDir = path.join(os.homedir(), '.bb-browser', 'sites')
+    fs.mkdirSync(bbSitesDir, { recursive: true })
+
+    // 确定 adapters 源目录
+    const adaptersSrc = isPkg()
+      ? path.join(process.resourcesPath, 'python-scripts', 'adapters')
+      : path.join(__dirname, '..', '..', 'adapters')
+
+    if (!fs.existsSync(adaptersSrc)) {
+      log(`⚠️  adapters 源目录不存在：${adaptersSrc}`)
+      return
+    }
+
+    // 递归 copy adapters/ → ~/.bb-browser/sites/
+    function copyDir(src, dest) {
+      fs.mkdirSync(dest, { recursive: true })
+      for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+        const srcPath = path.join(src, entry.name)
+        const destPath = path.join(dest, entry.name)
+        if (entry.isDirectory()) {
+          copyDir(srcPath, destPath)
+        } else if (entry.name.endsWith('.js')) {
+          fs.copyFileSync(srcPath, destPath)
+        }
+      }
+    }
+
+    copyDir(adaptersSrc, bbSitesDir)
+    log(`✅ adapters 已安装到 ${bbSitesDir}`)
+  } catch (e) {
+    log(`⚠️  安装 adapters 失败：${e.message}`)
+  }
+}
+
 app.whenReady().then(async () => {
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  // 把内嵌 adapters 安装到 ~/.bb-browser/sites/（bb-browser site 命令依赖此目录）
+  installAdapters()
 
   // 启动 Backend server（AI 助手 + FastAPI）
   await startBackend()
