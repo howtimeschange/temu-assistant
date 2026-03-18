@@ -385,6 +385,29 @@ MIT
 
 ## Changelog
 
+### v1.1.5 (2026-03-18)
+
+- 🐛 **Windows 修复**：Electron 启动时自动将内嵌 adapter 安装到 `~/.bb-browser/sites/`，修复打包版 `bb-browser site jd/shop-prices` 找不到 adapter 导致抓取 0 个 SKU 的问题
+
+### v1.1.4 (2026-03-18)
+
+- 🔧 **CI 修复**：macOS x64 构建时用子 shell 执行 `npm install`，避免 `cd` 影响后续路径；bb-browser 依赖打包修复
+
+### v1.1.3 (2026-03-17)
+
+- 🔧 **打包修复**：CI 中为 bb-browser 安装独立 `node_modules`，修复打包后依赖缺失导致运行报错
+
+### v1.1.2 (2026-03-17)
+
+- 🐛 **Windows bb-browser 路径修复**：打包版正确解析 bb-browser 可执行路径
+- 🤖 **AI 模型升级**：升级至 MiniMax M2.5，修复打包版 AI 模块路径推导和 JSON 解析错误
+- 🍎 **macOS 修复**：DMG 内 `.command` 脚本自动清除 quarantine 属性，修复脚本本身被 Gatekeeper 拦截的问题
+
+### v1.1.1 (2026-03-17)
+
+- 🐛 **打包版关键修复**：修复 AI 后端依赖缺失、backend 未打包、Chrome CDP 连接等待超时等问题
+- 🔧 多轮 code review 后的稳定性改进
+
 ### v1.1.0 (2026-03-17)
 
 - 🤖 **AI 助手**：内置 MiniMax M2.1 智能助手，支持日志排查、巡检结果分析、配置修改，流式输出 + 工具调用
