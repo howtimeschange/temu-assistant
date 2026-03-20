@@ -41,9 +41,9 @@ jobs:
             "${BASE}/cpython-3.12.13%2B20260310-x86_64-apple-darwin-install_only_stripped.tar.gz"
           tar -xzf /tmp/py_x64.tar.gz -C "$DIST/mac-x64" --strip-components=1
 
-          echo "📦 Installing openpyxl..."
-          "$DIST/mac-arm64/bin/pip3" install openpyxl --quiet
-          "$DIST/mac-x64/bin/pip3" install openpyxl --quiet
+          echo "📦 Installing openpyxl + fastapi + uvicorn..."
+          "$DIST/mac-arm64/bin/pip3" install openpyxl fastapi uvicorn --quiet
+          "$DIST/mac-x64/bin/pip3" install openpyxl fastapi uvicorn --quiet
 
           echo "✅ Done: $(du -sh $DIST/mac-arm64 $DIST/mac-x64 | awk '{print $1, $2}')"
 
@@ -100,8 +100,8 @@ jobs:
           # Windows runner 有 Python3，用它来 pip install 到目标目录
           WIN_SITE="$DIST/win-x64/Lib/site-packages"
           mkdir -p "$WIN_SITE"
-          pip install openpyxl --target "$WIN_SITE" --quiet
-          echo "✅ openpyxl installed to win-x64"
+          pip install openpyxl fastapi uvicorn --target "$WIN_SITE" --quiet
+          echo "✅ openpyxl + fastapi + uvicorn installed to win-x64"
 
       - name: Build Windows NSIS installer
         shell: bash

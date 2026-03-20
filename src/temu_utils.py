@@ -93,7 +93,32 @@ setTimeout(() => process.exit(0), 3000);
         time.sleep(wait)
 
 
-def _find_node() -> str:
+def _find_ws_module() -> str:
+    """返回 node_modules/ws 的父目录（即 node_modules 的父），作为 node 运行 cwd。
+    打包后在 Resources/python-scripts/，开发时在 electron-app/。
+    """
+    # 1. 从 TEMU_SCRIPTS_DIR 推算（Electron main.js 会传这个 env）
+    scripts_dir = os.environ.get("TEMU_SCRIPTS_DIR", "")
+    if scripts_dir:
+        candidate = os.path.join(scripts_dir, "node_modules", "ws")
+        if os.path.isdir(candidate):
+            return scripts_dir
+
+    # 2. 相对于本文件位置推算（src/temu_utils.py → ../node_modules/ws）
+    here = os.path.dirname(os.path.abspath(__file__))
+    for base in [
+        os.path.join(here, ".."),            # 开发: python-scripts/src/ → python-scripts/
+        os.path.join(here, "..", ".."),      # 开发: src/ → electron-app/ (如果脚本在根)
+    ]:
+        candidate = os.path.join(base, "node_modules", "ws")
+        if os.path.isdir(os.path.normpath(candidate)):
+            return os.path.normpath(base)
+
+    # 3. fallback: 当前工作目录
+    return os.getcwd()
+
+
+
     """找 node 可执行路径。
     优先用 TEMU_NODE_BIN（Electron 传入的 process.execPath），
     结合 ELECTRON_RUN_AS_NODE=1 可让 Electron 以纯 Node 模式运行脚本。
