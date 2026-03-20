@@ -84,11 +84,12 @@ def has_see_more_btn(ws_url: str) -> bool:
 
 
 def click_see_more(ws_url: str) -> bool:
-    """点击「查看更多」按钮"""
+    """点击「查看更多/See more」按钮（中英文兼容）"""
     js = """
     (function() {
-      // 优先点内部 button（aria-label="查看更多商品"）
-      var btn = document.querySelector('div[aria-label="查看更多商品"][role="button"]');
+      // 优先点内部 button（中文: 查看更多商品 | 英文: See more items）
+      var btn = document.querySelector('div[aria-label="查看更多商品"][role="button"]')
+             || document.querySelector('div[aria-label="See more items"][role="button"]');
       if (!btn) btn = document.querySelector('div._3HKY2899[role="link"]');
       if (!btn) {
         var els = document.querySelectorAll('[aria-label*="查看更多"], [aria-label*="See more"]');
@@ -157,7 +158,9 @@ def scrape_items_batch(ws_url: str, offset: int, limit: int = 50) -> list:
         r.name = card.getAttribute('data-tooltip-title') || '';
         if (!r.name && linkEl) {{
           r.name = linkEl.innerText.trim()
-            .replace(/在新标签页中打开。/g, '').trim().split('\\n')[0];
+            .replace(/在新标签页中打开。/g, '')
+            .replace(/Open in a new tab\\./gi, '')
+            .trim().split('\\n')[0];
         }}
 
         var mainImg = card.querySelector('img[data-js-main-img="true"]')
@@ -181,10 +184,10 @@ def scrape_items_batch(ws_url: str, offset: int, limit: int = 50) -> list:
         var allSoldEls = card.querySelectorAll('._2XgTiMJi');
         for (var j=0; j<allSoldEls.length; j++) {{
           var t = allSoldEls[j].innerText.trim();
-          if (t.startsWith('已售') || t.match(/^\\d+.*件$/)) {{ soldEl = allSoldEls[j]; break; }}
+          if (t.startsWith('已售') || t.startsWith('Sold') || t.match(/^\\d+.*件$/) || t.match(/^Sold\\s+\\d+/i)) {{ soldEl = allSoldEls[j]; break; }}
         }}
         if (soldEl) {{
-          r.sold = soldEl.innerText.trim().replace(/^已售/, '');
+          r.sold = soldEl.innerText.trim().replace(/^已售/, '').replace(/^Sold\\s+/i, '');
         }} else {{
           for (var j = 0; j < allEls.length; j++) {{
             var t = allEls[j].children.length === 0 && allEls[j].innerText
@@ -246,6 +249,20 @@ def run(mall_url: str = "", output_path: str = None, print_fn=print):
         print_fn("🔍 导航到店铺页面...")
         cdp_navigate(ws_url, mall_url)
         time.sleep(3)
+
+    # 先切回「首页/Home」tab，确保商品卡片可见
+    print_fn("🏠 切换到首页...")
+    cdp_eval(ws_url, """
+    (function() {
+      var navItems = document.querySelectorAll('h2._2kIA1PhC');
+      for (var i = 0; i < navItems.length; i++) {
+        var txt = navItems[i].innerText.trim();
+        if (txt === '首页' || txt === 'Home') { navItems[i].click(); return 'clicked:' + txt; }
+      }
+      return 'not-found';
+    })()
+    """)
+    time.sleep(1.5)
 
     # 获取商品总数（nav 区域「175 商品」）
     total = get_goods_total(ws_url)
