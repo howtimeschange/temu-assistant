@@ -105,32 +105,74 @@ setTimeout(() => process.exit(0), 3000);
 
 
 def _find_node() -> str:
-    """找 node 可执行路径"""
-    node_env = os.environ.get("ELECTRON_NODE_BIN")
+    """找真正的 node 可执行路径（不能是 Electron 自身）"""
+    # 优先用环境变量（Electron main.js 可设置真实 node 路径）
+    node_env = os.environ.get("TEMU_NODE_BIN") or os.environ.get("ELECTRON_NODE_BIN")
     if node_env and os.path.exists(node_env):
-        return node_env
-    for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "node"]:
-        if p == "node" or os.path.exists(p):
-            return p
-    return "node"
+        # 验证不是 Electron（文件名不含 electron 也不含 app 名）
+        basename = os.path.basename(node_env).lower()
+        if "electron" not in basename and "temu" not in basename:
+            return node_env
+
+    # 常见系统 node 路径（macOS + Linux）
+    candidates = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+        os.path.expanduser("~/.nvm/versions/node/*/bin/node"),
+        "/usr/local/nvm/versions/node/*/bin/node",
+    ]
+    import glob
+    for pattern in candidates:
+        if '*' in pattern:
+            matches = glob.glob(pattern)
+            if matches:
+                return sorted(matches)[-1]  # 最新版本
+        elif os.path.exists(pattern):
+            return pattern
+
+    # 最后用 PATH 里的 node，但验证它不是 Electron
+    try:
+        result = subprocess.run(["which", "node"], capture_output=True, text=True, timeout=3)
+        if result.returncode == 0:
+            path = result.stdout.strip()
+            basename = os.path.basename(path).lower()
+            if path and "electron" not in basename and "temu" not in basename:
+                return path
+    except Exception:
+        pass
+
+    return "/opt/homebrew/bin/node"  # macOS 默认 fallback
 
 
 def _find_ws_module() -> str:
-    """找包含 ws 模块的 node_modules 目录"""
-    # Electron app 目录
+    """找包含 ws 模块的 node_modules 目录（兼容打包和开发模式）"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
+    # 打包后：script_dir = .../Resources/python-scripts/src
+    # 开发时：script_dir = .../temu-assistant/src
 
-    # 优先用 electron-app/node_modules
+    # 1. 优先：python-scripts 同级的 node_modules/ws（打包时 extraResources 放这里）
+    parent = os.path.dirname(script_dir)
+    if os.path.exists(os.path.join(parent, "node_modules", "ws")):
+        return parent
+
+    # 2. electron-app/node_modules（开发模式）
+    project_root = os.path.dirname(parent)
     electron_app = os.path.join(project_root, "electron-app")
     if os.path.exists(os.path.join(electron_app, "node_modules", "ws")):
         return electron_app
 
-    # 回退到项目根
+    # 3. 项目根 node_modules
     if os.path.exists(os.path.join(project_root, "node_modules", "ws")):
         return project_root
 
-    return project_root
+    # 4. 打包后 Resources 目录（script_dir 的父父）
+    resources_dir = os.path.dirname(parent)
+    if os.path.exists(os.path.join(resources_dir, "node_modules", "ws")):
+        return resources_dir
+
+    return parent  # fallback
+
 
 
 def bb(args, timeout=20):

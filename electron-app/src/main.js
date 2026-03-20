@@ -69,23 +69,60 @@ function getBbDaemonScript() {
 }
 
 function getNodeBin() {
-  if (!isPkg()) {
-    try {
-      const which = require('child_process').execSync('which node', { encoding: 'utf8' }).trim()
-      if (which) return which
-    } catch (_) {}
-    if (process.platform === 'win32') {
-      try {
-        const which = require('child_process').execSync('where node', { encoding: 'utf8' }).split('\n')[0].trim()
-        if (which) return which
-      } catch (_) {}
+  // 不能用 process.execPath —— 打包后那是 Electron 自身，不是 node
+  // 必须找系统真实的 node 可执行文件
+  const { execSync } = require('child_process')
+
+  if (process.platform === 'win32') {
+    // Windows: 先找常见路径，再用 where
+    const winPaths = [
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+    ]
+    for (const p of winPaths) {
+      if (fs.existsSync(p)) return p
     }
+    try {
+      const r = execSync('where node', { encoding: 'utf8' }).split('\n')[0].trim()
+      if (r && fs.existsSync(r)) return r
+    } catch (_) {}
+    return 'node'
   }
-  return process.execPath  // Used with ELECTRON_RUN_AS_NODE=1
+
+  // macOS / Linux: 按优先级搜索
+  const unixPaths = [
+    '/opt/homebrew/bin/node',  // macOS Apple Silicon homebrew
+    '/usr/local/bin/node',     // macOS Intel homebrew / nvm
+    '/usr/bin/node',
+  ]
+  for (const p of unixPaths) {
+    if (fs.existsSync(p)) return p
+  }
+  // 用 which，但验证不是 Electron
+  try {
+    const r = execSync('which node 2>/dev/null', { encoding: 'utf8', shell: true }).trim()
+    if (r && !r.includes('electron') && !r.toLowerCase().includes('temu') && fs.existsSync(r)) {
+      return r
+    }
+  } catch (_) {}
+
+  // nvm 路径（glob-like）
+  try {
+    const nvmBase = path.join(process.env.HOME || '', '.nvm', 'versions', 'node')
+    if (fs.existsSync(nvmBase)) {
+      const versions = fs.readdirSync(nvmBase).sort().reverse()
+      for (const v of versions) {
+        const p = path.join(nvmBase, v, 'bin', 'node')
+        if (fs.existsSync(p)) return p
+      }
+    }
+  } catch (_) {}
+
+  return '/opt/homebrew/bin/node'  // 最终 fallback
 }
 
 function nodeNeedsElectronFlag() {
-  return getNodeBin() === process.execPath
+  return false  // 我们始终用真实 node，不需要 ELECTRON_RUN_AS_NODE
 }
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -216,8 +253,8 @@ async function startBackend() {
       PYTHONUTF8: '1',
       ELECTRON_RESOURCES_PATH: isPkg() ? process.resourcesPath : '',
       ELECTRON_BB_BROWSER_SCRIPT: getBbDaemonScript(),
-      ELECTRON_NODE_BIN: getNodeBin(),
-      ELECTRON_NODE_NEEDS_FLAG: nodeNeedsElectronFlag() ? '1' : '',
+      TEMU_NODE_BIN: getNodeBin(),
+      ELECTRON_NODE_NEEDS_FLAG: '0',
     },
   })
 
@@ -404,8 +441,8 @@ function runPythonTask(scriptName, args) {
         PYTHONUTF8: '1',
         ELECTRON_RESOURCES_PATH: isPkg() ? process.resourcesPath : '',
         ELECTRON_BB_BROWSER_SCRIPT: getBbDaemonScript(),
-        ELECTRON_NODE_BIN: getNodeBin(),
-        ELECTRON_NODE_NEEDS_FLAG: nodeNeedsElectronFlag() ? '1' : '',
+        TEMU_NODE_BIN: getNodeBin(),
+        ELECTRON_NODE_NEEDS_FLAG: '0',
       },
     })
 
