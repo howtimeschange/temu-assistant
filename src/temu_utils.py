@@ -22,7 +22,8 @@ def bb_json(args, timeout=30) -> dict:
     """运行 bb-browser 命令，解析 JSON 输出"""
     r = bb(args + ["--json"], timeout=timeout)
     if r.returncode != 0:
-        return {"error": r.stderr.strip() or "bb-browser error", "items": []}
+        err_msg = (r.stderr.strip() or r.stdout.strip() or "bb-browser error")[:300]
+        return {"error": err_msg, "items": []}
     try:
         out = r.stdout.strip()
         start = out.find('{')
