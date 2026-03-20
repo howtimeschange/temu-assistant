@@ -263,10 +263,22 @@ def run(mode: str = "current", regions: list = None, output_path: str = None, lo
     available_names = [r['text'] for r in available]
     print_fn(f"📋 可用地区：{available_names}")
 
+    # 英文 key → 中文名映射（兼容 Electron 界面传入的英文值）
+    _REGION_MAP = {
+        "global": "全球",
+        "us": "美国",
+        "eu": "欧区",
+        "全球": "全球",
+        "美国": "美国",
+        "欧区": "欧区",
+    }
+
     if regions is None:
         target_regions = available_names
     else:
-        target_regions = [r for r in regions if r in available_names]
+        # 先做英文→中文映射，再过滤掉不在可用列表里的
+        mapped = [_REGION_MAP.get(r, r) for r in regions]
+        target_regions = [r for r in mapped if r in available_names]
 
     if not target_regions:
         print_fn("⚠️ 没有可用的地区")
