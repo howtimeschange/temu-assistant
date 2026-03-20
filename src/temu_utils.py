@@ -118,7 +118,7 @@ def _find_ws_module() -> str:
     return os.getcwd()
 
 
-
+def _find_node() -> str:
     """找 node 可执行路径。
     优先用 TEMU_NODE_BIN（Electron 传入的 process.execPath），
     结合 ELECTRON_RUN_AS_NODE=1 可让 Electron 以纯 Node 模式运行脚本。
