@@ -28,7 +28,7 @@ def get_tab_ws_url(domain: str) -> str | None:
     return None
 
 
-def cdp_eval(ws_url: str, expression: str, timeout: int = 10):
+def cdp_eval(ws_url: str, expression: str, timeout: int = 30):
     """通过 CDP WebSocket 执行 JS 表达式，返回结果值"""
     import threading
     import json as _json
@@ -74,15 +74,15 @@ setTimeout(() => {{ process.exit(1); }}, {timeout * 1000});
 
     result = subprocess.run(
         [node_bin, "--input-type=module" if False else "-e", node_script],
-        capture_output=True, text=True, timeout=timeout + 2,
+        capture_output=True, text=False, timeout=timeout + 2,
         cwd=ws_path
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
     try:
-        return json.loads(result.stdout.strip())
+        return json.loads(result.stdout.decode('utf-8', errors='replace').strip())
     except Exception:
-        return result.stdout.strip()
+        return result.stdout.decode('utf-8', errors='replace').strip()
 
 
 def cdp_navigate(ws_url: str, url: str, wait: float = 0.5):

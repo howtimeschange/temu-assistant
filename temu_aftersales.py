@@ -184,9 +184,54 @@ def scrape_region(ws_url: str, region_name: str, print_fn) -> list:
     return all_rows
 
 
-def run(regions: list = None, output_path: str = None, print_fn=print):
+def wait_for_login(ws_url: str, region: str, print_fn, timeout: int = 120) -> bool:
+    """切换地区后检测是否需要重新登录，等待用户手动完成。返回 True 表示已就绪。"""
+    # 检测登录页特征：出现登录表单、或 URL 跳转到 login/passport
+    login_check_js = """
+    (function() {
+      var url = location.href;
+      var isLogin = url.includes('/login') || url.includes('/passport') || url.includes('/signin');
+      var hasLoginForm = document.querySelector('input[type="password"]') !== null;
+      var hasData = document.querySelectorAll('tr.TB_tr_5-120-1').length > 0;
+      return {isLogin: isLogin || hasLoginForm, hasData: hasData, url: url.substring(0, 80)};
+    })()
+    """
+    state = cdp_eval(ws_url, login_check_js)
+    if not isinstance(state, dict):
+        return True
+
+    if state.get('hasData'):
+        return True
+
+    if state.get('isLogin'):
+        print_fn(f"\n⚠️  切换到【{region}】后需要重新登录！")
+        print_fn(f"   请在 Chrome 中完成登录，完成后程序将自动继续...")
+        print_fn(f"   (最多等待 {timeout} 秒)")
+
+        start = time.time()
+        while time.time() - start < timeout:
+            time.sleep(3)
+            state2 = cdp_eval(ws_url, login_check_js)
+            if isinstance(state2, dict) and state2.get('hasData'):
+                print_fn(f"   ✓ 登录成功，继续抓取...")
+                return True
+            if isinstance(state2, dict) and not state2.get('isLogin') and state2.get('hasData') is False:
+                # 页面加载中，继续等
+                pass
+
+        print_fn(f"   ❌ 等待超时（{timeout}s），跳过 {region}")
+        return False
+
+    # 页面正在加载，再等一下
+    time.sleep(2)
+    state3 = cdp_eval(ws_url, login_check_js)
+    return isinstance(state3, dict) and (state3.get('hasData') or not state3.get('isLogin'))
+
+
+def run(regions: list = None, output_path: str = None, login_timeout: int = 120, print_fn=print):
     """
     regions: ['全球', '美国', '欧区'] 或 None（抓所有可用地区）
+    login_timeout: 切换地区需要重新登录时，等待用户操作的最长秒数（默认 120s）
     """
     install_temu_adapters()
 
@@ -225,7 +270,17 @@ def run(regions: list = None, output_path: str = None, print_fn=print):
         if not ok:
             print_fn(f"  ⚠️ 切换 {region} 失败，跳过")
             continue
-        time.sleep(2)  # 等待数据刷新
+        time.sleep(2)  # 等待页面跳转
+
+        # 检测是否需要重新登录
+        ready = wait_for_login(ws_url, region, print_fn, timeout=login_timeout)
+        if not ready:
+            continue
+
+        # ws_url 可能因为地区跳转域名变了，重新获取
+        ws_url_new = get_tab_ws_url(DOMAIN)
+        if ws_url_new:
+            ws_url = ws_url_new
 
         rows = scrape_region(ws_url, region, print_fn)
         if rows:
@@ -234,6 +289,8 @@ def run(regions: list = None, output_path: str = None, print_fn=print):
                 "headers": HEADERS,
                 "rows": rows
             })
+        elif rows is not None:
+            print_fn(f"  ℹ️  {region} 无数据（0条）")
 
     if not sheets:
         print_fn("⚠️ 未抓取到任何数据")
@@ -250,6 +307,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Temu 售后数据抓取")
     parser.add_argument("--regions", nargs="+", default=None,
                         help="指定地区（全球 美国 欧区），默认全部")
+    parser.add_argument("--login-timeout", type=int, default=120,
+                        help="等待重新登录的最长秒数（默认 120s）")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
-    run(regions=args.regions, output_path=args.output)
+    run(regions=args.regions, output_path=args.output, login_timeout=args.login_timeout)

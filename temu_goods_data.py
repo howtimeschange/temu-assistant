@@ -165,8 +165,13 @@ def set_time_filter(ws_url: str, option_text: str, print_fn=print) -> bool:
     return str(r2).startswith('selected:')
 
 
-def run(mode: str = "current", start_date: str = "", end_date: str = "",
+def run(mode: str = "current", time_range: str = "", start_date: str = "", end_date: str = "",
         output_path: str = None, login_wait: int = 40, print_fn=print):
+    """
+    time_range: 预设时间区间，可选值: '近7天' / '近30天' / '近90天'
+                留空则使用当前页面默认值。
+                注意：Temu 商品数据页的时间筛选是下拉选择，不支持自由日期输入。
+    """
     install_temu_adapters()
 
     if output_path is None:
@@ -185,8 +190,9 @@ def run(mode: str = "current", start_date: str = "", end_date: str = "",
 
     # 等待表格出现
     print_fn("⏳ 等待页面加载...")
-    start = time.time()
-    while time.time() - start < 15:
+    t0 = time.time()
+    count = 0
+    while time.time() - t0 < 15:
         js = "document.querySelectorAll('tbody tr.TB_tr_5-120-1').length"
         count = cdp_eval(ws_url, js)
         if isinstance(count, int) and count > 0:
@@ -194,27 +200,44 @@ def run(mode: str = "current", start_date: str = "", end_date: str = "",
         time.sleep(1)
     print_fn(f"  页面已加载，检测到 {count} 行数据")
 
-    # 设置时间筛选
-    if start_date or end_date:
-        print_fn(f"📅 设置时间筛选: {start_date} ~ {end_date}")
-        # 将日期范围转换为最接近的预设选项（近30天/近90天等）
-        # 或者直接不设置，使用默认值抓取当前显示数据
-        # Temu 后台时间筛选是 Select 下拉，不是自由日期输入
-        print_fn("  ℹ️  Temu 商品数据页时间区间为预设下拉（近7天/近30天/近90天）")
-        print_fn("  ℹ️  将使用默认时间范围抓取当前显示数据")
-
-    # 点查询刷新（确保数据是最新的）
-    js_query = """
-    (function(){
-      var btns = document.querySelectorAll('button');
-      for (var i=0; i<btns.length; i++){
-        if (btns[i].textContent.trim() === '查询') { btns[i].click(); return true; }
-      }
-      return false;
-    })()
-    """
-    cdp_eval(ws_url, js_query)
-    time.sleep(2)
+    # 设置时间区间（近7天/近30天/近90天）
+    if time_range:
+        print_fn(f"📅 设置时间区间：{time_range}")
+        ok = set_time_filter(ws_url, time_range, print_fn)
+        if ok:
+            # 点查询按钮刷新
+            time.sleep(0.5)
+            js_query = """
+            (function(){
+              var btns = document.querySelectorAll('button');
+              for (var i=0; i<btns.length; i++){
+                if (btns[i].textContent.trim() === '查询') { btns[i].click(); return true; }
+              }
+              return false;
+            })()
+            """
+            cdp_eval(ws_url, js_query)
+            time.sleep(2)
+            # 等待表格刷新
+            old_count = count
+            wait_table_load(ws_url, old_count if isinstance(old_count, int) else 0)
+            count = cdp_eval(ws_url, "document.querySelectorAll('tbody tr.TB_tr_5-120-1').length")
+            print_fn(f"  ✓ 筛选后检测到 {count} 行数据")
+        else:
+            print_fn(f"  ⚠️ 未找到「{time_range}」选项，可用值：近7天 / 近30天 / 近90天")
+    else:
+        # 没有指定时间区间，直接点查询刷新当前数据
+        js_query = """
+        (function(){
+          var btns = document.querySelectorAll('button');
+          for (var i=0; i<btns.length; i++){
+            if (btns[i].textContent.trim() === '查询') { btns[i].click(); return true; }
+          }
+          return false;
+        })()
+        """
+        cdp_eval(ws_url, js_query)
+        time.sleep(2)
 
     # 开始抓取所有页
     print_fn("🚀 开始抓取商品数据...")
@@ -257,10 +280,10 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Temu 商品数据抓取")
     parser.add_argument("--mode", choices=["current", "new"], default="current")
-    parser.add_argument("--start", default="", help="开始日期 YYYY-MM-DD")
-    parser.add_argument("--end",   default="", help="结束日期 YYYY-MM-DD")
+    parser.add_argument("--time-range", default="",
+                        help="时间区间预设：近7天 / 近30天 / 近90天（留空使用页面默认值）")
     parser.add_argument("--output", default=None)
     parser.add_argument("--wait",  type=int, default=40)
     args = parser.parse_args()
-    run(mode=args.mode, start_date=args.start, end_date=args.end,
+    run(mode=args.mode, time_range=args.time_range,
         output_path=args.output, login_wait=args.wait)
