@@ -70,41 +70,56 @@ def get_goods_total(ws_url: str) -> int:
 
 
 def has_see_more_btn(ws_url: str) -> bool:
-    """检查是否存在「查看更多」按钮"""
-    js = """
+    """检查是否存在「查看更多/See more」按钮（仅检测商品列表区域的按钮）"""
+    js = r"""
     (function() {
-      var btn = document.querySelector('div._3HKY2899[role="link"]');
-      if (btn) return true;
-      // 降级：aria-label 包含「查看更多」的 button
-      var btns = document.querySelectorAll('[aria-label*="查看更多"], [aria-label*="See more"], [aria-label*="see more"]');
-      return btns.length > 0;
+      // 优先找紧邻商品卡的 See more：父链含 _3Pga2OjH 的
+      var btns = document.querySelectorAll('div._3HKY2899[role="link"]');
+      for (var i = 0; i < btns.length; i++) {
+        var p = btns[i].parentElement;
+        var depth = 0;
+        while (p && depth < 8) {
+          if (p.className && p.className.indexOf('_3Pga2OjH') >= 0) return true;
+          p = p.parentElement; depth++;
+        }
+      }
+      // 降级：aria-label 包含「查看更多」的 button（通用兼容）
+      var fallback = document.querySelectorAll('[aria-label="查看更多商品"][role="button"], [aria-label="See more items"][role="button"]');
+      return fallback.length > 0;
     })()
     """
     return bool(cdp_eval(ws_url, js))
 
 
 def click_see_more(ws_url: str) -> bool:
-    """点击「查看更多/See more」按钮（中英文兼容）"""
-    js = """
+    """点击「查看更多/See more」按钮（仅点商品列表区域，避免误点分类跳转按钮）"""
+    js = r"""
     (function() {
-      // 优先点内部 button（中文: 查看更多商品 | 英文: See more items）
-      var btn = document.querySelector('div[aria-label="查看更多商品"][role="button"]')
-             || document.querySelector('div[aria-label="See more items"][role="button"]');
-      if (!btn) btn = document.querySelector('div._3HKY2899[role="link"]');
-      if (!btn) {
-        var els = document.querySelectorAll('[aria-label*="查看更多"], [aria-label*="See more"]');
-        if (els.length > 0) btn = els[0];
+      // 优先找父链含 _3Pga2OjH 的 See more（商品列表区域）
+      var btns = document.querySelectorAll('div._3HKY2899[role="link"]');
+      for (var i = 0; i < btns.length; i++) {
+        var p = btns[i].parentElement;
+        var depth = 0;
+        while (p && depth < 8) {
+          if (p.className && p.className.indexOf('_3Pga2OjH') >= 0) {
+            // 点内部的 button
+            var innerBtn = btns[i].querySelector('[aria-label="See more items"][role="button"]')
+                        || btns[i].querySelector('[aria-label="查看更多商品"][role="button"]');
+            if (innerBtn) { innerBtn.scrollIntoView({block:'center'}); innerBtn.click(); return 'clicked-inner'; }
+            btns[i].scrollIntoView({block:'center'}); btns[i].click(); return 'clicked-outer';
+          }
+          p = p.parentElement; depth++;
+        }
       }
-      if (btn) {
-        btn.scrollIntoView({block: 'center'});
-        btn.click();
-        return 'clicked';
-      }
+      // 降级：直接找 See more items button
+      var btn = document.querySelector('[aria-label="See more items"][role="button"]')
+             || document.querySelector('[aria-label="查看更多商品"][role="button"]');
+      if (btn) { btn.scrollIntoView({block:'center'}); btn.click(); return 'clicked-fallback'; }
       return 'not-found';
     })()
     """
     r = cdp_eval(ws_url, js)
-    return str(r) == 'clicked'
+    return str(r).startswith('clicked')
 
 
 def scroll_and_load(ws_url: str, current_count: int, total: int, print_fn=print, max_clicks: int = 30) -> int:
@@ -250,29 +265,22 @@ def run(mall_url: str = "", output_path: str = None, print_fn=print):
         cdp_navigate(ws_url, mall_url)
         time.sleep(3)
 
-    # 先切回「首页/Home」tab，确保商品卡片可见
-    print_fn("🏠 切换到首页...")
-    cdp_eval(ws_url, """
-    (function() {
-      var navItems = document.querySelectorAll('h2._2kIA1PhC');
-      for (var i = 0; i < navItems.length; i++) {
-        var txt = navItems[i].innerText.trim();
-        if (txt === '首页' || txt === 'Home') { navItems[i].click(); return 'clicked:' + txt; }
-      }
-      return 'not-found';
-    })()
-    """)
-    time.sleep(1.5)
+    # 点击「Items/商品」tab，获取完整商品列表（不是首页精选）
+    print_fn("📦 点击「Items/商品」tab...")
+    ok = click_items_tab(ws_url)
+    if not ok:
+        print_fn("⚠️ 未找到 Items tab，尝试继续...")
+    time.sleep(2.0)
 
-    # 获取商品总数（nav 区域「175 商品」）
+    # 获取商品总数（nav 区域「175 商品/Items」）
     total = get_goods_total(ws_url)
-    print_fn(f"📦 共 {total} 件商品，开始加载...")
+    print_fn(f"  共 {total} 件商品，开始加载...")
 
-    # 初始加载数量（首页已渲染的商品卡）
+    # 当前已渲染的商品卡数量
     cur = cdp_eval(ws_url, "document.querySelectorAll('div._6q6qVUF5._1UrrHYym').length")
     cur = cur if isinstance(cur, int) else 0
 
-    # 滚动触发懒加载直到全量
+    # 点「See more/查看更多」直到全量
     if total > cur:
         print_fn(f"  当前已加载 {cur} 件，滚动加载剩余...")
         cur = scroll_and_load(ws_url, cur, total, print_fn)
