@@ -1,54 +1,77 @@
-#!/usr/bin/env bash
-# download-python.sh — Download python-build-standalone and install Python deps
-set -euo pipefail
+#!/bin/bash
+# scripts/download-python.sh
+# 下载 python-build-standalone 到 python-dist/，用于打包进 Electron
+# 用法: bash scripts/download-python.sh [mac-arm64] [mac-x64] [win-x64]
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ELECTRON_APP_DIR="$(dirname "$SCRIPT_DIR")"
-PYTHON_VERSION="3.11.9"
-PYTHON_RELEASE="20240814"  # cpython-3.11.9+20240814
-DEST_DIR="$ELECTRON_APP_DIR/resources/python"
+DIST_DIR="$SCRIPT_DIR/../python-dist"
+VERSION="20260310"
+PY_VERSION="3.12.13"
+BASE="https://github.com/astral-sh/python-build-standalone/releases/download/${VERSION}"
+PROXY="${GITHUB_PROXY:-}"  # 可设置 https://ghproxy.net/ 加速
 
-# ── Detect arch ──────────────────────────────────────────────────────────────
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ]; then
-  PLATFORM="aarch64-apple-darwin"
-else
-  PLATFORM="x86_64-apple-darwin"
-fi
+mkdir -p "$DIST_DIR"
 
-FILENAME="cpython-${PYTHON_VERSION}+${PYTHON_RELEASE}-${PLATFORM}-install_only.tar.gz"
-URL="https://github.com/indygreg/python-build-standalone/releases/download/${PYTHON_RELEASE}/${FILENAME}"
+download_and_extract() {
+  local name="$1"
+  local file="$2"
+  local dest="$DIST_DIR/$name"
 
-echo "▶ Detected arch: $ARCH"
-echo "▶ Download URL: $URL"
+  if [ -d "$dest/bin" ] || [ -d "$dest/python" ]; then
+    echo "✅ $name already exists, skip"
+    return
+  fi
 
-# ── Already exists? ───────────────────────────────────────────────────────────
-if [ -f "$DEST_DIR/bin/python3" ]; then
-  echo "✓ Python already present at $DEST_DIR — skipping download"
-else
-  echo "▶ Downloading Python $PYTHON_VERSION for $PLATFORM …"
-  TMPFILE=$(mktemp /tmp/python-standalone.XXXXXX.tar.gz)
-  trap "rm -f '$TMPFILE'" EXIT
+  echo "⬇️  Downloading $name..."
+  local url="${PROXY}${BASE}/${file}"
+  curl -L -o "/tmp/${file}" "$url" --progress-bar
 
-  curl -L --progress-bar -o "$TMPFILE" "$URL"
+  echo "📦 Extracting $name..."
+  mkdir -p "$dest"
+  tar -xzf "/tmp/${file}" -C "$dest" --strip-components=1
+  rm -f "/tmp/${file}"
 
-  echo "▶ Extracting to $DEST_DIR …"
-  rm -rf "$DEST_DIR"
-  mkdir -p "$DEST_DIR"
-  tar -xzf "$TMPFILE" --strip-components=1 -C "$DEST_DIR"
-  echo "✓ Python extracted"
-fi
+  # 安装 openpyxl
+  local pip
+  if [ -f "$dest/bin/pip3" ]; then
+    pip="$dest/bin/pip3"
+  elif [ -f "$dest/python/pip.exe" ]; then
+    pip="$dest/python/pip.exe"
+  elif [ -f "$dest/pip3" ]; then
+    pip="$dest/pip3"
+  fi
 
-PYTHON_BIN="$DEST_DIR/bin/python3"
+  if [ -n "$pip" ]; then
+    echo "📦 Installing openpyxl into $name..."
+    "$pip" install openpyxl --quiet
+  else
+    echo "⚠️  pip not found in $name, skip openpyxl install"
+  fi
 
-# ── Install Python deps ───────────────────────────────────────────────────────
-echo "▶ Installing Python dependencies …"
-"$PYTHON_BIN" -m pip install --upgrade pip --quiet
-"$PYTHON_BIN" -m pip install \
-  pyyaml openpyxl python-dateutil requests \
-  fastapi uvicorn httpx \
-  --quiet
+  echo "✅ $name ready"
+}
+
+TARGETS="${*:-mac-arm64 mac-x64 win-x64}"
+
+for target in $TARGETS; do
+  case "$target" in
+    mac-arm64)
+      download_and_extract "mac-arm64" "cpython-${PY_VERSION}+${VERSION}-aarch64-apple-darwin-install_only_stripped.tar.gz"
+      ;;
+    mac-x64)
+      download_and_extract "mac-x64" "cpython-${PY_VERSION}+${VERSION}-x86_64-apple-darwin-install_only_stripped.tar.gz"
+      ;;
+    win-x64)
+      download_and_extract "win-x64" "cpython-${PY_VERSION}+${VERSION}-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+      ;;
+    *)
+      echo "Unknown target: $target"
+      ;;
+  esac
+done
 
 echo ""
-echo "✅ Done! Python ready at: $DEST_DIR"
-"$PYTHON_BIN" --version
+echo "🎉 All done! python-dist contents:"
+ls -lh "$DIST_DIR"

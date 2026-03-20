@@ -58,18 +58,25 @@ extraResources:
       - config.yaml
       - "src/**/*.py"
       - "adapters/**/*.js"
-  # Python 依赖（openpyxl 等），打包后由 PYTHONPATH 注入
+  # Python 依赖（openpyxl 等）fallback vendor（打包 Python 里已含，这是双保险）
   - from: "python-vendor"
     to: python-scripts/vendor
-  # ws node module alongside python-scripts (so _find_ws_module can find it)
+  # ws node module（供 ELECTRON_RUN_AS_NODE 模式使用）
   - from: "node_modules/ws"
     to: python-scripts/node_modules/ws
   # Backend FastAPI server
   - from: backend
     to: backend
-  # bb-browser (outside asar so .js files are accessible)
+  # bb-browser
   - from: node_modules/bb-browser
     to: bb-browser
+
+# macOS 打包时的额外钩子：通过 afterPack 脚本按 arch 拷贝对应 Python
+afterPack: scripts/after-pack.js
+
+asarUnpack:
+  - "**/*.node"
+
 
 asarUnpack:
   - "**/*.node"
