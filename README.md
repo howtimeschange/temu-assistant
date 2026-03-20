@@ -148,6 +148,20 @@ npm run build:win
 
 ---
 
+## ❓ 常见问题
+
+**macOS 提示「已损坏，无法打开」**
+
+这是 macOS Gatekeeper 对未签名 app 的拦截。在终端执行：
+
+```bash
+xattr -cr "/Applications/Temu Assistant.app"
+```
+
+然后正常双击打开即可。
+
+---
+
 ## 📄 许可证
 
 MIT License
