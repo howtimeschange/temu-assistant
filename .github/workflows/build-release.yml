@@ -83,49 +83,6 @@ jobs:
       - name: Install npm deps
         run: cd electron-app && npm ci
 
-      - name: Regenerate icon.ico (ensure 256x256 layer for electron-builder)
-        shell: python
-        run: |
-          import struct, io
-          from PIL import Image
-
-          src = 'electron-app/assets/icon.png'
-          dst = 'electron-app/assets/icon.ico'
-
-          img = Image.open(src).convert('RGBA')
-          sizes = [16, 32, 48, 64, 128, 256]
-
-          entries = []
-          for s in sizes:
-              resized = img.resize((s, s), Image.LANCZOS)
-              buf = io.BytesIO()
-              # compress_level=0 => 最大体积，确保 electron-builder 识别为有效 256x256
-              resized.save(buf, format='PNG', compress_level=0)
-              entries.append((s, buf.getvalue()))
-
-          header = struct.pack('<HHH', 0, 1, len(sizes))
-          data_offset = 6 + len(sizes) * 16
-          directory = b''
-          image_data = b''
-          for s, data in entries:
-              w = 0 if s == 256 else s  # ICO 规范：0 代表 256
-              directory += struct.pack('<BBBBHHII', w, w, 0, 0, 1, 32, len(data), data_offset)
-              data_offset += len(data)
-              image_data += data
-
-          with open(dst, 'wb') as f:
-              f.write(header + directory + image_data)
-
-          with open(dst, 'rb') as f:
-              d = f.read()
-          _, _, count = struct.unpack('<HHH', d[:6])
-          print(f'Generated ICO: {count} layers, {len(d)} bytes total')
-          for i in range(count):
-              off = 6 + i * 16
-              w, h, _, _, _, bpp, size, _ = struct.unpack('<BBBBHHII', d[off:off+16])
-              w2 = 256 if w == 0 else w
-              print(f'  {w2}x{w2}: {size} bytes')
-
       - name: Download bundled Python (win-x64)
         shell: bash
         run: |
