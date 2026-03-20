@@ -32,30 +32,38 @@
 
 ## 🚀 快速开始
 
-### 前提条件
+### 下载安装（推荐）
+
+前往 [Releases](../../releases) 下载最新版本，**开箱即用，无需安装任何依赖**：
+
+| 平台 | 文件 | 说明 |
+|------|------|------|
+| macOS (Apple Silicon M1-M4) | `Temu.Assistant-*-arm64.dmg` | 推荐 |
+| macOS (Intel) | `Temu.Assistant-*-x64.dmg` | Intel Mac |
+| Windows 10/11 | `Temu.Assistant.Setup-*.exe` | x64 |
+
+> ✅ **内置 Python 3.12 + openpyxl，无需安装 Python 或 Node.js**  
+> 唯一前提：安装 [Google Chrome](https://www.google.com/chrome/)
+
+### 本地开发运行
+
+**前提条件**
 
 - macOS 12+ 或 Windows 10+
 - Google Chrome（已登录 Temu 账号）
 - Python 3.10+（macOS 推荐 `/opt/homebrew/bin/python3`）
+- Node.js 18+
 
-### 安装依赖
+**安装依赖**
 
 ```bash
 pip3 install openpyxl requests websocket-client
 ```
 
-### 启动应用
-
-**方式一：下载 Release**
-
-前往 [Releases](../../releases) 下载最新版本：
-- macOS → `.dmg`
-- Windows → `.exe`（NSIS 安装包）
-
-**方式二：本地运行**
+**启动应用**
 
 ```bash
-git clone https://github.com/xingyicheng/temu-assistant.git
+git clone https://github.com/howtimeschange/temu-assistant.git
 cd temu-assistant/electron-app
 npm install
 npm start
