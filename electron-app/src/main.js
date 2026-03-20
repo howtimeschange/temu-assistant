@@ -549,8 +549,7 @@ ipcMain.handle('run-task', async (_, task, params) => {
       scriptName = 'temu_goods_data.py'
       const mode = params.mode || 'current'
       args = ['--mode', mode]
-      if (params.start_date) args.push('--start', params.start_date)
-      if (params.end_date)   args.push('--end',   params.end_date)
+      if (params.time_range) args.push('--time-range', params.time_range)
       break
     }
     case 'aftersales': {
@@ -565,13 +564,13 @@ ipcMain.handle('run-task', async (_, task, params) => {
     case 'reviews': {
       scriptName = 'temu_reviews.py'
       if (!params.shop_url) return { ok: false, msg: '请提供店铺链接' }
-      args = [params.shop_url]
+      args = ['--url', params.shop_url]
       break
     }
     case 'store-items': {
       scriptName = 'temu_store_items.py'
       if (!params.shop_url) return { ok: false, msg: '请提供店铺链接' }
-      args = [params.shop_url]
+      args = ['--url', params.shop_url]
       break
     }
     default:

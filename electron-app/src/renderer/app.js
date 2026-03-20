@@ -178,20 +178,13 @@ async function stopCurrentTask() {
 }
 
 // ── 商品数据 ──────────────────────────────────────────────────────────────────
-document.getElementById('goods-use-date').addEventListener('change', (e) => {
-  document.getElementById('goods-date-range').classList.toggle('hidden', !e.target.checked)
-})
-
 document.getElementById('btn-goods-start').addEventListener('click', async () => {
   if (state.running) { showToast('请先停止当前任务'); return }
 
   const mode = document.querySelector('input[name="goods-mode"]:checked')?.value || 'current'
-  const useDate = document.getElementById('goods-use-date').checked
+  const timeRange = document.getElementById('goods-time-range').value
   const params = { mode }
-  if (useDate) {
-    params.start_date = document.getElementById('goods-start-date').value
-    params.end_date   = document.getElementById('goods-end-date').value
-  }
+  if (timeRange) params.time_range = timeRange
 
   appendLog('goods', '\n▶ 开始抓取商品数据…')
   setTaskRunning('goods-data', 'goods')

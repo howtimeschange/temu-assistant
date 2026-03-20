@@ -48,6 +48,7 @@ html, body {
 /* 可选择区域 */
 .log-area,
 .form-input,
+.form-select,
 .path-row input,
 .hint-box,
 .file-list {
@@ -264,7 +265,8 @@ html, body {
   color: var(--text-2);
 }
 
-.form-input {
+.form-input,
+.form-select {
   padding: 8px 12px;
   background: var(--bg-3);
   border: 1px solid var(--border);
@@ -276,7 +278,18 @@ html, body {
   width: 100%;
 }
 
-.form-input:focus {
+.form-select {
+  max-width: 200px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.form-input:focus,
+.form-select:focus {
   outline: none;
   border-color: var(--accent);
 }

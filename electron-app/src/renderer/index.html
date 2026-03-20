@@ -84,23 +84,13 @@
               </div>
             </div>
             <div class="form-row">
-              <label class="toggle-label">
-                <input type="checkbox" id="goods-use-date" />
-                <span>指定时间区间</span>
-              </label>
-            </div>
-            <div class="form-date-range hidden" id="goods-date-range">
-              <div class="date-inputs">
-                <div class="date-field">
-                  <label>开始日期</label>
-                  <input type="date" id="goods-start-date" />
-                </div>
-                <span class="date-sep">—</span>
-                <div class="date-field">
-                  <label>结束日期</label>
-                  <input type="date" id="goods-end-date" />
-                </div>
-              </div>
+              <label class="form-label">时间区间</label>
+              <select class="form-select" id="goods-time-range">
+                <option value="">全部（不过滤）</option>
+                <option value="近7天">近 7 天</option>
+                <option value="近30天">近 30 天</option>
+                <option value="近90天">近 90 天</option>
+              </select>
             </div>
             <div class="form-actions">
               <button class="btn btn-primary btn-run" id="btn-goods-start">
@@ -193,8 +183,8 @@
             <div class="form-row">
               <label class="form-label">店铺链接</label>
               <input type="text" class="form-input" id="reviews-url"
-                placeholder="例: https://www.temu.com/store-reviews.html?store_id=123456" />
-              <span class="form-hint">请填写 Temu 店铺评价页链接</span>
+                placeholder="例: https://www.temu.com/mall.html?mall_id=634418214560482" />
+              <span class="form-hint">请填写 Temu 店铺主页链接（mall.html?mall_id=...），脚本会自动点击「Reviews/评价」tab</span>
             </div>
             <div class="form-actions">
               <button class="btn btn-primary btn-run" id="btn-reviews-start">
@@ -228,8 +218,8 @@
             <div class="form-row">
               <label class="form-label">店铺链接</label>
               <input type="text" class="form-input" id="store-url"
-                placeholder="例: https://www.temu.com/store.html?store_id=123456" />
-              <span class="form-hint">请填写 Temu 店铺链接</span>
+                placeholder="例: https://www.temu.com/mall.html?mall_id=634418214560482" />
+              <span class="form-hint">请填写 Temu 店铺主页链接（mall.html?mall_id=...），脚本会自动点击「Items/商品」tab 并加载全量商品</span>
             </div>
             <div class="form-actions">
               <button class="btn btn-primary btn-run" id="btn-store-start">
