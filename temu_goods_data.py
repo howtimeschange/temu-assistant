@@ -12,7 +12,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 from src.temu_utils import (
     install_temu_adapters, desktop_path, timestamped_name,
-    cdp_eval, cdp_navigate, get_tab_ws_url
+    cdp_eval, cdp_navigate, get_tab_ws_url, cdp_open_new_tab, CDP_PORT
 )
 from src.temu_excel import write_temu_excel
 
@@ -180,8 +180,17 @@ def run(mode: str = "current", time_range: str = "", start_date: str = "", end_d
     # 获取 tab ws url
     ws_url = get_tab_ws_url(DOMAIN)
     if not ws_url:
-        print_fn(f"❌ 未找到 {DOMAIN} 的 tab，请先在 Chrome 中打开 Temu 运营后台")
-        return None
+        if mode == "new":
+            print_fn(f"🌐 未找到 {DOMAIN} 的 tab，正在新开标签页...")
+            ws_url = cdp_open_new_tab(GOODS_URL, wait=4.0)
+            if not ws_url:
+                print_fn(f"❌ 新开标签页失败，请检查 Chrome 是否已启动（CDP 端口 {CDP_PORT}）")
+                return None
+            print_fn("✅ 已打开商品数据页面，等待加载...")
+            time.sleep(2)
+        else:
+            print_fn(f"❌ 未找到 {DOMAIN} 的 tab，请先在 Chrome 中打开 Temu 运营后台，或切换「全新页面」模式")
+            return None
 
     # 导航到商品数据页
     print_fn(f"🔍 导航到商品数据页面...")

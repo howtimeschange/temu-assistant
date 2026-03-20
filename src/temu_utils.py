@@ -166,11 +166,60 @@ def get_tab_by_domain(domain: str) -> str | None:
     return None
 
 
-def open_new_tab(url: str) -> str | None:
-    """新开 tab 并导航到 url，返回 tab index"""
-    bb(["tab", "new", url])
-    time.sleep(2)
-    return get_tab_by_domain(url.split('/')[2])
+def cdp_open_new_tab(url: str, wait: float = 3.0) -> str | None:
+    """通过 CDP Target.createTarget 新开 tab 并导航，返回新 tab 的 ws url"""
+    node_script = f"""
+const http = require('http');
+const WebSocket = require('ws');
+
+// 先获取任意一个页面 tab 的 ws url 用来发命令
+http.get('http://127.0.0.1:{CDP_PORT}/json', (res) => {{
+  let d = '';
+  res.on('data', x => d += x);
+  res.on('end', () => {{
+    const tabs = JSON.parse(d);
+    const tab = tabs.find(t => t.type === 'page' && t.webSocketDebuggerUrl);
+    if (!tab) {{ process.stderr.write('no page tab found'); process.exit(1); }}
+    const ws = new WebSocket(tab.webSocketDebuggerUrl);
+    ws.on('open', () => {{
+      // 新建 tab
+      ws.send(JSON.stringify({{id: 1, method: 'Target.createTarget', params: {{url: {json.dumps(url)}}}}}));
+    }});
+    ws.on('message', (raw) => {{
+      const msg = JSON.parse(raw.toString());
+      if (msg.id === 1) {{
+        ws.close();
+        process.stdout.write(msg.result && msg.result.targetId ? msg.result.targetId : '');
+        process.exit(0);
+      }}
+    }});
+    ws.on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
+    setTimeout(() => process.exit(1), 5000);
+  }});
+}}).on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
+"""
+    node_bin = _find_node()
+    ws_path = _find_ws_module()
+    result = subprocess.run([node_bin, "-e", node_script], capture_output=True, timeout=8, cwd=ws_path)
+    target_id = result.stdout.decode('utf-8', errors='replace').strip()
+    if not target_id:
+        return None
+    time.sleep(wait)  # 等待页面加载
+    # 通过 /json 找到新 tab 的 ws url
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json", timeout=3) as resp:
+            tabs = json.loads(resp.read())
+        for tab in tabs:
+            if tab.get("id") == target_id or target_id in tab.get("webSocketDebuggerUrl", ""):
+                return tab.get("webSocketDebuggerUrl")
+        # fallback: 找 url 匹配的
+        domain = url.split('/')[2] if '//' in url else url
+        for tab in tabs:
+            if tab.get("type") == "page" and domain in tab.get("url", ""):
+                return tab.get("webSocketDebuggerUrl")
+    except Exception:
+        pass
+    return None
 
 
 def navigate_tab(tab: str, url: str):

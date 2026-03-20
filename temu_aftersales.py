@@ -11,7 +11,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 from src.temu_utils import (
     install_temu_adapters, desktop_path, timestamped_name,
-    cdp_eval, cdp_navigate, get_tab_ws_url
+    cdp_eval, cdp_navigate, get_tab_ws_url, cdp_open_new_tab, CDP_PORT
 )
 from src.temu_excel import write_temu_excel
 
@@ -228,8 +228,9 @@ def wait_for_login(ws_url: str, region: str, print_fn, timeout: int = 120) -> bo
     return isinstance(state3, dict) and (state3.get('hasData') or not state3.get('isLogin'))
 
 
-def run(regions: list = None, output_path: str = None, login_timeout: int = 120, print_fn=print):
+def run(mode: str = "current", regions: list = None, output_path: str = None, login_timeout: int = 120, print_fn=print):
     """
+    mode: 'current'（当前页）或 'new'（全新页面，找不到 tab 时自动打开）
     regions: ['全球', '美国', '欧区'] 或 None（抓所有可用地区）
     login_timeout: 切换地区需要重新登录时，等待用户操作的最长秒数（默认 120s）
     """
@@ -240,8 +241,17 @@ def run(regions: list = None, output_path: str = None, login_timeout: int = 120,
 
     ws_url = get_tab_ws_url(DOMAIN)
     if not ws_url:
-        print_fn("❌ 未找到 agentseller.temu.com 的 tab，请先在 Chrome 中打开售后页面")
-        return None
+        if mode == "new":
+            print_fn(f"🌐 未找到 {DOMAIN} 的 tab，正在新开标签页...")
+            ws_url = cdp_open_new_tab(AFTERSALES_URL, wait=4.0)
+            if not ws_url:
+                print_fn(f"❌ 新开标签页失败，请确认 Chrome 已启动（CDP 端口 {CDP_PORT}）并已登录 Temu")
+                return None
+            print_fn("✅ 已打开售后页面，等待加载...")
+            time.sleep(2)
+        else:
+            print_fn("❌ 未找到 agentseller.temu.com 的 tab，请先在 Chrome 中打开售后页面，或切换「全新页面」模式")
+            return None
 
     # 确保在售后页面
     print_fn("🔍 导航到售后信息页面...")
@@ -305,10 +315,12 @@ def run(regions: list = None, output_path: str = None, login_timeout: int = 120,
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Temu 售后数据抓取")
+    parser.add_argument("--mode", choices=["current", "new"], default="current",
+                        help="current=当前页（默认），new=全新页面（自动打开）")
     parser.add_argument("--regions", nargs="+", default=None,
                         help="指定地区（全球 美国 欧区），默认全部")
     parser.add_argument("--login-timeout", type=int, default=120,
                         help="等待重新登录的最长秒数（默认 120s）")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
-    run(regions=args.regions, output_path=args.output, login_timeout=args.login_timeout)
+    run(mode=args.mode, regions=args.regions, output_path=args.output, login_timeout=args.login_timeout)
