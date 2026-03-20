@@ -1,7 +1,8 @@
 """
 Temu 运营助手 — 售后数据抓取
 页面: https://agentseller.temu.com/main/aftersales/information
-支持全球 / 美国 / 欧区切换
+支持地区: 全球 / 美国 / 欧区
+使用 CDP WebSocket 直连，自动翻页抓取全量数据
 """
 import sys
 import os
@@ -9,179 +10,246 @@ import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 from src.temu_utils import (
-    bb, bb_json, get_tab_by_domain, open_new_tab, navigate_tab,
-    wait_for_selector, click_next_page, close_popup, install_temu_adapters,
-    desktop_path, timestamped_name
+    install_temu_adapters, desktop_path, timestamped_name,
+    cdp_eval, cdp_navigate, get_tab_ws_url
 )
 from src.temu_excel import write_temu_excel
 
+DOMAIN = "agentseller"  # 匹配 agentseller.temu.com 和 agentseller-us.temu.com 等子域名
 AFTERSALES_URL = "https://agentseller.temu.com/main/aftersales/information"
-LOGIN_URL      = "https://agentseller.temu.com/"
-DOMAIN         = "agentseller.temu.com"
 
-# 地区配置：显示名 → 点击目标文本（根据实际页面可能需要调整）
-REGIONS = {
-    "全球": "All",
-    "美国": "United States",
-    "欧区": "Europe",
-}
+HEADERS = ["序号", "单号", "货品SKU ID", "商品名称", "品质分", "售后问题处理倍数",
+           "消费者售后申请原因", "消费者售后申请时间"]
 
 
-def switch_region(tab: str, region_text: str) -> bool:
-    """切换地区（点击对应的地区 tab/选项）"""
+def get_regions(ws_url: str) -> list:
+    """获取可用地区列表（排除 disabled）"""
+    js = """
+    (function() {
+      var items = document.querySelectorAll('a.index-module__drItem___3eLtO');
+      return Array.from(items)
+        .filter(function(a) { return !a.classList.contains('index-module__disabled___3n06o'); })
+        .map(function(a) {
+          return {
+            text: a.innerText.trim(),
+            active: a.classList.contains('index-module__active___2QJPF')
+          };
+        });
+    })()
+    """
+    result = cdp_eval(ws_url, js)
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def switch_region(ws_url: str, region_text: str) -> bool:
+    """点击切换地区"""
     js = f"""
     (function() {{
-      const allEls = Array.from(document.querySelectorAll('button, [role="tab"], li, a, span'));
-      const target = allEls.find(el => {{
-        const t = el.innerText.trim();
-        return t === '{region_text}' || t.includes('{region_text}');
-      }});
-      if (target && target.offsetParent !== null) {{
-        target.click();
-        return true;
+      var items = document.querySelectorAll('a.index-module__drItem___3eLtO');
+      for (var i = 0; i < items.length; i++) {{
+        if (items[i].innerText.trim() === '{region_text}' &&
+            !items[i].classList.contains('index-module__disabled___3n06o')) {{
+          items[i].click();
+          return 'clicked:' + items[i].innerText.trim();
+        }}
       }}
-      return false;
+      return 'not-found';
     }})()
     """
-    r = bb(["eval", js, "--tab", tab], timeout=10)
-    return r.stdout.strip().lower() == 'true'
+    r = cdp_eval(ws_url, js)
+    return str(r).startswith('clicked:')
 
 
-def scrape_all_pages(tab: str, region: str, print_fn=print) -> tuple[list, list]:
-    """循环抓取所有分页"""
+def get_total(ws_url: str) -> int:
+    """获取总条数"""
+    js = """
+    (function() {
+      var el = document.querySelector('.PGT_totalText_5-120-1');
+      if (!el) return 0;
+      var m = el.innerText.match(/\\d+/);
+      return m ? parseInt(m[0]) : 0;
+    })()
+    """
+    r = cdp_eval(ws_url, js)
+    return int(r) if isinstance(r, int) else 0
+
+
+def scrape_page(ws_url: str) -> list:
+    """抓取当前页所有数据行"""
+    js = """
+    (function() {
+      var results = [];
+      // 数据行：包含 td 的 tr（排除表头 tr，表头包含 th）
+      var allRows = document.querySelectorAll('tr.TB_tr_5-120-1');
+      var dataRows = Array.from(allRows).filter(function(row) {
+        return row.querySelector('td') !== null;
+      });
+
+      for (var i = 0; i < dataRows.length; i++) {
+        var tds = dataRows[i].querySelectorAll('td.TB_td_5-120-1');
+        var cells = Array.from(tds).map(function(td) { return td.innerText.trim(); });
+        if (cells.length > 0) results.push(cells);
+      }
+      return results;
+    })()
+    """
+    result = cdp_eval(ws_url, js)
+    return result if isinstance(result, list) else []
+
+
+def has_next_page(ws_url: str) -> bool:
+    js = """
+    (function() {
+      var next = document.querySelector('li.PGT_next_5-120-1');
+      if (!next) return false;
+      return !next.classList.contains('PGT_disabled_5-120-1');
+    })()
+    """
+    return bool(cdp_eval(ws_url, js))
+
+
+def click_next_page(ws_url: str):
+    js = """
+    (function() {
+      var next = document.querySelector('li.PGT_next_5-120-1');
+      if (next && !next.classList.contains('PGT_disabled_5-120-1')) {
+        next.click(); return true;
+      }
+      return false;
+    })()
+    """
+    cdp_eval(ws_url, js)
+
+
+def wait_page_change(ws_url: str, old_first_cell: str, timeout: int = 10) -> bool:
+    """等待翻页完成（检测第一行第一列变化）"""
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(0.5)
+        js = """
+        (function() {
+          var allRows = document.querySelectorAll('tr.TB_tr_5-120-1');
+          var dataRows = Array.from(allRows).filter(function(r) { return r.querySelector('td') !== null; });
+          if (dataRows.length === 0) return '';
+          var td = dataRows[0].querySelector('td.TB_td_5-120-1');
+          return td ? td.innerText.trim() : '';
+        })()
+        """
+        cur = cdp_eval(ws_url, js)
+        if str(cur) != str(old_first_cell):
+            time.sleep(0.3)
+            return True
+    return False
+
+
+def scrape_region(ws_url: str, region_name: str, print_fn) -> list:
+    """抓取某地区全量数据"""
+    total = get_total(ws_url)
+    print_fn(f"  📊 {region_name}：共 {total} 条")
+    if total == 0:
+        return []
+
     all_rows = []
-    headers  = []
     page = 1
 
     while True:
-        print_fn(f"  [{region}] 第 {page} 页...")
+        print_fn(f"    正在抓取第 {page} 页...")
+        # 获取当前第一行第一单元格，用于检测翻页
+        js_first = """
+        (function() {
+          var allRows = document.querySelectorAll('tr.TB_tr_5-120-1');
+          var dataRows = Array.from(allRows).filter(function(r) { return r.querySelector('td') !== null; });
+          if (dataRows.length === 0) return '';
+          var td = dataRows[0].querySelector('td.TB_td_5-120-1');
+          return td ? td.innerText.trim() : '';
+        })()
+        """
+        first_cell = cdp_eval(ws_url, js_first)
 
-        # 先处理弹窗
-        popup = close_popup(tab)
-        if popup["closed"]:
-            print_fn(f"  ↳ 自动关闭了弹窗")
-            time.sleep(1)
-        elif popup["still_visible"]:
-            print_fn(f"  ⚠️  检测到弹窗无法自动关闭，请手动处理后按 Enter 继续...")
-            input()
-
-        data = bb_json(["site", "temu/aftersales"])
-
-        if "error" in data:
-            print_fn(f"  ⚠️  抓取出错: {data['error']}")
-            break
-
-        if not headers and data.get("headers"):
-            headers = data["headers"]
-
-        rows = data.get("items", [])
+        rows = scrape_page(ws_url)
+        print_fn(f"    ✓ 第 {page} 页获取 {len(rows)} 条")
         all_rows.extend(rows)
-        print_fn(f"  ✓ 获取 {len(rows)} 条（累计 {len(all_rows)}）")
 
-        if not data.get("hasNextPage", False):
+        if not has_next_page(ws_url):
+            print_fn(f"    ↳ 已是最后一页")
             break
 
-        clicked = click_next_page(tab)
-        if not clicked:
-            print_fn("  ↳ 未找到下一页，停止")
-            break
-
-        time.sleep(2.5)
+        click_next_page(ws_url)
+        wait_page_change(ws_url, first_cell)
         page += 1
+        time.sleep(0.3)
 
-    return headers, all_rows
+    return all_rows
 
 
-def run(mode: str = "current", regions: list = None, output_path: str = None,
-        login_wait: int = 40, print_fn=print):
+def run(regions: list = None, output_path: str = None, print_fn=print):
     """
-    mode: 'current' 或 'new'
-    regions: 要抓取的地区列表，如 ['全球', '美国', '欧区']，默认全抓
+    regions: ['全球', '美国', '欧区'] 或 None（抓所有可用地区）
     """
     install_temu_adapters()
-
-    if regions is None:
-        regions = list(REGIONS.keys())
 
     if output_path is None:
         output_path = desktop_path(timestamped_name("temu_aftersales"))
 
-    tab = None
+    ws_url = get_tab_ws_url(DOMAIN)
+    if not ws_url:
+        print_fn("❌ 未找到 agentseller.temu.com 的 tab，请先在 Chrome 中打开售后页面")
+        return None
 
-    if mode == "new":
-        print_fn(f"📂 新开页面，导航到 {LOGIN_URL}")
-        tab = open_new_tab(LOGIN_URL)
-        print_fn(f"⏳ 请在 {login_wait}s 内完成登录并切换到目标站点/店铺...")
-        time.sleep(login_wait)
-        navigate_tab(tab, AFTERSALES_URL)
-        time.sleep(3)
+    # 确保在售后页面
+    print_fn("🔍 导航到售后信息页面...")
+    cdp_navigate(ws_url, AFTERSALES_URL)
+    time.sleep(3)
+
+    # 获取可用地区
+    available = get_regions(ws_url)
+    available_names = [r['text'] for r in available]
+    print_fn(f"📋 可用地区：{available_names}")
+
+    if regions is None:
+        target_regions = available_names
     else:
-        print_fn(f"🔍 使用当前已登录页面...")
-        tab = get_tab_by_domain(DOMAIN)
-        if not tab:
-            print_fn("⚠️  未找到 agentseller.temu.com tab，尝试新开...")
-            tab = open_new_tab(AFTERSALES_URL)
-            time.sleep(5)
-        else:
-            navigate_tab(tab, AFTERSALES_URL)
-            time.sleep(3)
+        target_regions = [r for r in regions if r in available_names]
 
-    if tab is None:
-        print_fn("❌ 无法获取 tab，退出")
+    if not target_regions:
+        print_fn("⚠️ 没有可用的地区")
         return None
 
-    print_fn("⏳ 等待售后页面加载...")
-    wait_for_selector(tab, 'table, [class*="table"]', max_wait=20)
-    time.sleep(2)
-
-    all_sheets = []
-
-    for region in regions:
-        region_text = REGIONS.get(region, region)
-        print_fn(f"\n🌍 切换到地区: {region} ({region_text})")
-
-        success = switch_region(tab, region_text)
-        if not success:
-            print_fn(f"  ⚠️  未找到 {region} 地区按钮，跳过")
+    # 每个地区抓一个 sheet
+    sheets = []
+    for region in target_regions:
+        print_fn(f"\n🌍 切换到：{region}")
+        ok = switch_region(ws_url, region)
+        if not ok:
+            print_fn(f"  ⚠️ 切换 {region} 失败，跳过")
             continue
+        time.sleep(2)  # 等待数据刷新
 
-        time.sleep(2.5)
-        headers, rows = scrape_all_pages(tab, region, print_fn)
+        rows = scrape_region(ws_url, region, print_fn)
+        if rows:
+            sheets.append({
+                "title": region,
+                "headers": HEADERS,
+                "rows": rows
+            })
 
-        if not headers:
-            max_cols = max(len(r) for r in rows) if rows else 0
-            headers = [f"列{i+1}" for i in range(max_cols)]
-
-        all_sheets.append({"title": region, "headers": headers, "rows": rows})
-        print_fn(f"  ✅ {region} 共 {len(rows)} 条")
-
-    if not all_sheets:
-        print_fn("⚠️  未抓取到任何数据")
+    if not sheets:
+        print_fn("⚠️ 未抓取到任何数据")
         return None
 
-    write_temu_excel(output_path, all_sheets)
-    total = sum(len(s["rows"]) for s in all_sheets)
-    print_fn(f"\n✅ 完成！{len(all_sheets)} 个地区，共 {total} 条，文件:\n   {output_path}")
+    write_temu_excel(output_path, sheets)
+    total = sum(len(s['rows']) for s in sheets)
+    print_fn(f"\n✅ 完成！共 {total} 条（{len(sheets)} 个地区），已保存到:\n   {output_path}")
     return output_path
 
 
 if __name__ == "__main__":
     import argparse
-
-    # 英文 key → 中文（兼容 Electron 传过来的 global/us/eu）
-    REGION_ALIAS = {"global": "全球", "us": "美国", "eu": "欧区"}
-    ALL_REGION_CHOICES = list(REGIONS.keys()) + list(REGION_ALIAS.keys())
-
     parser = argparse.ArgumentParser(description="Temu 售后数据抓取")
-    parser.add_argument("--mode", choices=["current", "new"], default="current")
-    parser.add_argument("--regions", nargs="+", choices=ALL_REGION_CHOICES, default=None)
+    parser.add_argument("--regions", nargs="+", default=None,
+                        help="指定地区（全球 美国 欧区），默认全部")
     parser.add_argument("--output", default=None)
-    parser.add_argument("--wait",  type=int, default=40)
     args = parser.parse_args()
-
-    # 把英文 alias 转成中文
-    regions = None
-    if args.regions:
-        regions = [REGION_ALIAS.get(r, r) for r in args.regions]
-
-    run(mode=args.mode, regions=regions, output_path=args.output, login_wait=args.wait)
+    run(regions=args.regions, output_path=args.output)
