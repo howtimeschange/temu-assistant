@@ -1,11 +1,12 @@
 {
-  "name": "jd-price-monitor",
+  "name": "temu-assistant",
   "version": "1.0.0",
-  "description": "京东价格监控 - 浮窗控制台",
+  "description": "Temu 运营助手 - 商品数据/售后/评价/价格抓取",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build:mac": "electron-builder --mac dmg",
+    "build:win": "electron-builder --win nsis",
     "bundle-python": "bash scripts/bundle-python.sh"
   },
   "dependencies": {

@@ -3,39 +3,31 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
-  // Status
+  // 状态
   getStatus: () => ipcRenderer.invoke('get-status'),
 
-  // Daemon & Chrome
-  startDaemon: () => ipcRenderer.invoke('start-daemon'),
-  launchChrome: (customPath) => ipcRenderer.invoke('launch-chrome', customPath),
+  // Chrome CDP
+  launchChrome: (path) => ipcRenderer.invoke('launch-chrome', path),
   checkChrome: () => ipcRenderer.invoke('check-chrome'),
   getChromePath: () => ipcRenderer.invoke('get-chrome-path'),
   saveChromePath: (p) => ipcRenderer.invoke('save-chrome-path', p),
   browseChromePath: () => ipcRenderer.invoke('browse-chrome-path'),
 
-  // Scrape
-  runOnce: () => ipcRenderer.invoke('run-once'),
-  stopRun: () => ipcRenderer.invoke('stop-run'),
-  startLoop: (intervalMinutes) => ipcRenderer.invoke('start-loop', intervalMinutes),
-  stopLoop: () => ipcRenderer.invoke('stop-loop'),
-
-  // Config
+  // 配置
   getConfig: () => ipcRenderer.invoke('get-config'),
   saveConfig: (cfg) => ipcRenderer.invoke('save-config', cfg),
 
-  // Files
-  openDataDir: () => ipcRenderer.invoke('open-data-dir'),
+  // 任务
+  runTask: (task, params) => ipcRenderer.invoke('run-task', task, params),
+  stopTask: () => ipcRenderer.invoke('stop-task'),
+
+  // 文件
+  openOutputDir: () => ipcRenderer.invoke('open-output-dir'),
   getRecentFiles: () => ipcRenderer.invoke('get-recent-files'),
   openFile: (p) => ipcRenderer.invoke('open-file', p),
   showInFinder: (p) => ipcRenderer.invoke('show-in-finder', p),
 
-  // Cron tasks
-  cronList: () => ipcRenderer.invoke('cron-list'),
-  cronAdd: (entry) => ipcRenderer.invoke('cron-add', entry),
-  cronDelete: (index) => ipcRenderer.invoke('cron-delete', index),
-
-  // Events from main → renderer
+  // main → renderer 事件
   onLog: (cb) => {
     ipcRenderer.on('log', (_, msg) => cb(msg))
     return () => ipcRenderer.removeAllListeners('log')

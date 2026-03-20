@@ -1,6 +1,6 @@
-appId: com.lobsterai.jd-price-monitor
-productName: JD Price Monitor
-copyright: "Copyright © 2024"
+appId: com.temu.assistant
+productName: Temu Assistant
+copyright: "Copyright © 2025"
 electronVersion: "29.4.6"
 
 directories:
@@ -31,15 +31,12 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  installerIcon: electron-app/assets/icon.ico
-  uninstallerIcon: electron-app/assets/icon.ico
-  installerHeaderIcon: electron-app/assets/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: JD Price Monitor
+  shortcutName: Temu Assistant
 
 dmg:
-  title: JD Price Monitor
+  title: Temu Assistant
   window:
     width: 540
     height: 380
@@ -52,11 +49,14 @@ files:
   - "!node_modules/bb-browser/**"
 
 extraResources:
-  # Python scripts from project root (one level up from electron-app/)
+  # Temu Python scripts from project root (one level up from electron-app/)
   - from: "."
     to: python-scripts
     filter:
-      - main.py
+      - temu_goods_data.py
+      - temu_aftersales.py
+      - temu_reviews.py
+      - temu_store_items.py
       - config.yaml
       - "src/**/*.py"
       - "adapters/**/*.js"

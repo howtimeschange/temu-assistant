@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>JD Price Monitor</title>
+  <title>Temu 运营助手</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- Title bar -->
   <div class="titlebar">
     <div class="titlebar-drag"></div>
-    <div class="titlebar-title">京东价格监控</div>
+    <div class="titlebar-title">Temu 运营助手</div>
     <div class="titlebar-indicators">
-      <span class="indicator" id="ind-daemon" title="bb-browser Daemon">
-        <span class="dot"></span> Daemon
-      </span>
       <span class="indicator" id="ind-chrome" title="Chrome CDP">
         <span class="dot"></span> Chrome
+      </span>
+      <span class="indicator" id="ind-daemon" title="bb-browser">
+        <span class="dot"></span> bb-browser
       </span>
     </div>
   </div>
@@ -24,38 +24,35 @@
   <div class="layout">
     <!-- Sidebar -->
     <aside class="sidebar">
+      <div class="sidebar-logo">
+        <span class="logo-icon">T</span>
+        <span class="logo-text">Temu 助手</span>
+      </div>
       <nav class="nav-menu">
-        <button class="nav-item active" data-panel="panel-run">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2l10 6-10 6V2z" fill="currentColor"/></svg>
-          巡检运行
+        <button class="nav-item active" data-panel="panel-goods">
+          <span class="nav-icon">📦</span>
+          <span class="nav-label">商品数据</span>
         </button>
-        <button class="nav-item" data-panel="panel-shop">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="2" y="4" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/><path d="M5 4V3a3 3 0 016 0v1" stroke="currentColor" stroke-width="1.5"/></svg>
-          店铺设置
+        <button class="nav-item" data-panel="panel-aftersales">
+          <span class="nav-icon">🔄</span>
+          <span class="nav-label">售后数据</span>
         </button>
-        <button class="nav-item" data-panel="panel-check">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 4L6 11 3 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          巡检配置
+        <button class="nav-item" data-panel="panel-reviews">
+          <span class="nav-icon">⭐</span>
+          <span class="nav-label">店铺评价</span>
         </button>
-        <button class="nav-item" data-panel="panel-notify">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2a4.5 4.5 0 00-4.5 4.5v2L2 10h12l-1.5-1.5v-2A4.5 4.5 0 008 2z" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 10.5v.5a1.5 1.5 0 003 0v-.5" stroke="currentColor" stroke-width="1.5"/></svg>
-          钉钉通知
+        <button class="nav-item" data-panel="panel-store">
+          <span class="nav-icon">🏪</span>
+          <span class="nav-label">站点商品</span>
         </button>
-        <button class="nav-item" data-panel="panel-chrome">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2.5" fill="currentColor"/></svg>
-          Chrome 连接
-        </button>
+        <div class="nav-divider"></div>
         <button class="nav-item" data-panel="panel-files">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 2h6l4 4v8H3V2z" stroke="currentColor" stroke-width="1.5"/><path d="M9 2v4h4" stroke="currentColor" stroke-width="1.5"/></svg>
-          数据文件
+          <span class="nav-icon">📁</span>
+          <span class="nav-label">输出文件</span>
         </button>
-        <button class="nav-item" data-panel="panel-cron">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3.5l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          定时任务
-        </button>
-        <button class="nav-item" data-panel="panel-ai">
-          <span class="nav-icon">🤖</span>
-          <span class="nav-label">AI 助手</span>
+        <button class="nav-item" data-panel="panel-settings">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">设置</span>
         </button>
       </nav>
     </aside>
@@ -63,146 +60,217 @@
     <!-- Main content -->
     <main class="main-content">
 
-      <!-- Panel: 巡检运行 -->
-      <section class="panel active" id="panel-run">
+      <!-- Panel: 商品数据 -->
+      <section class="panel active" id="panel-goods">
         <div class="panel-header">
-          <h2>巡检运行</h2>
+          <h2>📦 商品数据抓取</h2>
+          <div class="run-status-badge hidden" id="goods-status-badge">
+            <span class="badge-dot"></span> 运行中
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="form-card">
+            <div class="form-row">
+              <label class="form-label">登录模式</label>
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input type="radio" name="goods-mode" value="current" checked />
+                  <span>在当前页面（已登录）</span>
+                </label>
+                <label class="radio-item">
+                  <input type="radio" name="goods-mode" value="new" />
+                  <span>全新页面（重新导航）</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="toggle-label">
+                <input type="checkbox" id="goods-use-date" />
+                <span>指定时间区间</span>
+              </label>
+            </div>
+            <div class="form-date-range hidden" id="goods-date-range">
+              <div class="date-inputs">
+                <div class="date-field">
+                  <label>开始日期</label>
+                  <input type="date" id="goods-start-date" />
+                </div>
+                <span class="date-sep">—</span>
+                <div class="date-field">
+                  <label>结束日期</label>
+                  <input type="date" id="goods-end-date" />
+                </div>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-run" id="btn-goods-start">
+                <span class="btn-icon">▶</span> 开始抓取
+              </button>
+              <button class="btn btn-stop hidden" id="btn-goods-stop">
+                <span class="btn-icon">⏹</span> 停止
+              </button>
+            </div>
+          </div>
+          <div class="log-section">
+            <div class="log-header">
+              <span>运行日志</span>
+              <button class="btn-text" id="btn-clear-goods-log">清空</button>
+            </div>
+            <div class="log-area" id="goods-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: 售后数据 -->
+      <section class="panel" id="panel-aftersales">
+        <div class="panel-header">
+          <h2>🔄 售后数据抓取</h2>
+          <div class="run-status-badge hidden" id="aftersales-status-badge">
+            <span class="badge-dot"></span> 运行中
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="form-card">
+            <div class="form-row">
+              <label class="form-label">登录模式</label>
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input type="radio" name="aftersales-mode" value="current" checked />
+                  <span>在当前页面（已登录）</span>
+                </label>
+                <label class="radio-item">
+                  <input type="radio" name="aftersales-mode" value="new" />
+                  <span>全新页面（重新导航）</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row">
+              <label class="form-label">地区</label>
+              <div class="checkbox-group">
+                <label class="checkbox-item">
+                  <input type="checkbox" name="aftersales-region" value="global" checked />
+                  <span>全球</span>
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="aftersales-region" value="us" checked />
+                  <span>美国</span>
+                </label>
+                <label class="checkbox-item">
+                  <input type="checkbox" name="aftersales-region" value="eu" checked />
+                  <span>欧区</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-run" id="btn-aftersales-start">
+                <span class="btn-icon">▶</span> 开始抓取
+              </button>
+              <button class="btn btn-stop hidden" id="btn-aftersales-stop">
+                <span class="btn-icon">⏹</span> 停止
+              </button>
+            </div>
+          </div>
+          <div class="log-section">
+            <div class="log-header">
+              <span>运行日志</span>
+              <button class="btn-text" id="btn-clear-aftersales-log">清空</button>
+            </div>
+            <div class="log-area" id="aftersales-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: 店铺评价 -->
+      <section class="panel" id="panel-reviews">
+        <div class="panel-header">
+          <h2>⭐ 店铺评价抓取</h2>
+          <div class="run-status-badge hidden" id="reviews-status-badge">
+            <span class="badge-dot"></span> 运行中
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="form-card">
+            <div class="form-row">
+              <label class="form-label">店铺链接</label>
+              <input type="text" class="form-input" id="reviews-url"
+                placeholder="例: https://www.temu.com/store-reviews.html?store_id=123456" />
+              <span class="form-hint">请填写 Temu 店铺评价页链接</span>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-run" id="btn-reviews-start">
+                <span class="btn-icon">▶</span> 开始抓取
+              </button>
+              <button class="btn btn-stop hidden" id="btn-reviews-stop">
+                <span class="btn-icon">⏹</span> 停止
+              </button>
+            </div>
+          </div>
+          <div class="log-section">
+            <div class="log-header">
+              <span>运行日志</span>
+              <button class="btn-text" id="btn-clear-reviews-log">清空</button>
+            </div>
+            <div class="log-area" id="reviews-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: 站点商品 -->
+      <section class="panel" id="panel-store">
+        <div class="panel-header">
+          <h2>🏪 站点商品抓取</h2>
+          <div class="run-status-badge hidden" id="store-status-badge">
+            <span class="badge-dot"></span> 运行中
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="form-card">
+            <div class="form-row">
+              <label class="form-label">店铺链接</label>
+              <input type="text" class="form-input" id="store-url"
+                placeholder="例: https://www.temu.com/store.html?store_id=123456" />
+              <span class="form-hint">请填写 Temu 店铺链接</span>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-run" id="btn-store-start">
+                <span class="btn-icon">▶</span> 开始抓取
+              </button>
+              <button class="btn btn-stop hidden" id="btn-store-stop">
+                <span class="btn-icon">⏹</span> 停止
+              </button>
+            </div>
+          </div>
+          <div class="log-section">
+            <div class="log-header">
+              <span>运行日志</span>
+              <button class="btn-text" id="btn-clear-store-log">清空</button>
+            </div>
+            <div class="log-area" id="store-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Panel: 输出文件 -->
+      <section class="panel" id="panel-files">
+        <div class="panel-header">
+          <h2>📁 输出文件</h2>
           <div class="header-actions">
-            <button class="btn btn-secondary" id="btn-open-data">打开数据目录</button>
+            <button class="btn btn-secondary" id="btn-refresh-files">刷新</button>
+            <button class="btn btn-secondary" id="btn-open-desktop">打开桌面文件夹</button>
           </div>
         </div>
-
-        <!-- Action buttons -->
-        <div class="action-row">
-          <button class="btn btn-primary" id="btn-run-once">▶ 立即巡检</button>
-          <button class="btn btn-danger" id="btn-stop-run" disabled>⏹ 停止巡检</button>
-          <div class="separator"></div>
-          <button class="btn btn-secondary" id="btn-start-loop">⏰ 开始循环</button>
-          <button class="btn btn-danger" id="btn-stop-loop" disabled>⏹ 停止循环</button>
-          <div class="loop-interval-wrap">
-            <label>间隔</label>
-            <input type="number" id="loop-interval" value="60" min="5" max="1440" />
-            <span>分钟</span>
-          </div>
-        </div>
-
-        <!-- Kill-all emergency bar (visible only when something is running) -->
-        <div class="kill-bar hidden" id="kill-bar">
-          <span class="kill-bar-label">⚡ 任务进行中</span>
-          <button class="btn btn-danger btn-kill-all" id="btn-kill-all">🛑 强制终止全部</button>
-        </div>
-
-        <!-- Progress / status bar -->
-        <div class="status-bar" id="run-status-bar">
-          <span id="run-status-text">就绪</span>
-          <div class="progress-track hidden" id="progress-track">
-            <div class="progress-fill" id="progress-fill"></div>
-          </div>
-        </div>
-
-        <!-- Log area -->
-        <div class="log-section">
-          <div class="log-header">
-            <span>运行日志</span>
-            <button class="btn-text" id="btn-clear-log">清空</button>
-          </div>
-          <pre class="log-area" id="log-area"></pre>
+        <div class="file-list" id="file-list">
+          <div class="empty-state">暂无 temu_*.xlsx 文件</div>
         </div>
       </section>
 
-      <!-- Panel: 店铺设置 -->
-      <section class="panel" id="panel-shop">
-        <div class="panel-header"><h2>店铺设置</h2></div>
-        <div class="form-section">
-          <div class="form-row">
-            <label>店铺名称</label>
-            <input type="text" id="cfg-shop-name" placeholder="例: ASICS旗舰店" />
-          </div>
-          <div class="form-row">
-            <label>店铺 ID</label>
-            <input type="text" id="cfg-shop-id" placeholder="例: 1234567" />
-          </div>
-          <div class="form-row">
-            <label>Vendor ID</label>
-            <input type="text" id="cfg-vendor-id" placeholder="同 shop_id 可留空" />
-          </div>
-          <div class="form-row">
-            <label>CDP 端口</label>
-            <input type="number" id="cfg-cdp-port" placeholder="9222" value="9222" />
-          </div>
-          <button class="btn btn-primary" id="btn-save-shop">保存店铺设置</button>
+      <!-- Panel: 设置 -->
+      <section class="panel" id="panel-settings">
+        <div class="panel-header">
+          <h2>⚙️ 设置</h2>
         </div>
-      </section>
-
-      <!-- Panel: 巡检配置 -->
-      <section class="panel" id="panel-check">
-        <div class="panel-header"><h2>巡检配置</h2></div>
         <div class="form-section">
-          <div class="form-row">
-            <label>破价阈值 (%)</label>
-            <input type="number" id="cfg-threshold" placeholder="例: 5" step="0.1" />
-            <span class="form-hint">当前台价 &lt; 底价 × (1 - 阈值%) 时触发告警</span>
-          </div>
-          <div class="form-row">
-            <label>循环间隔 (分钟)</label>
-            <input type="number" id="cfg-interval" placeholder="60" min="5" />
-          </div>
-          <div class="form-row">
-            <label>保留天数</label>
-            <input type="number" id="cfg-keep-days" placeholder="7" min="1" />
-            <span class="form-hint">超过天数的历史文件自动清理</span>
-          </div>
-          <div class="form-divider"></div>
-          <div class="form-row">
-            <label>登录等待 (秒)</label>
-            <input type="number" id="cfg-login-wait" placeholder="30" min="0" />
-            <span class="form-hint">首次启动预留的登录京东时间，0 表示跳过</span>
-          </div>
-          <div class="form-row">
-            <label class="toggle-label">
-              <input type="checkbox" id="cfg-excel-to-desktop" />
-              Excel 导出到桌面
-            </label>
-            <span class="form-hint">关闭则保存到 data/ 目录</span>
-          </div>
-          <div class="form-row">
-            <label class="toggle-label">
-              <input type="checkbox" id="cfg-loop-export-excel" />
-              循环巡检每轮导出 Excel
-            </label>
-          </div>
-          <button class="btn btn-primary" id="btn-save-check">保存配置</button>
-        </div>
-      </section>
-
-      <!-- Panel: 钉钉通知 -->
-      <section class="panel" id="panel-notify">
-        <div class="panel-header"><h2>钉钉通知</h2></div>
-        <div class="form-section">
-          <div class="form-row">
-            <label>Webhook URL</label>
-            <input type="text" id="cfg-dd-webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
-          </div>
-          <div class="form-row">
-            <label>Secret (可选)</label>
-            <input type="text" id="cfg-dd-secret" placeholder="SEC..." />
-          </div>
-          <div class="form-row">
-            <label class="toggle-label">
-              <input type="checkbox" id="cfg-dd-enabled" />
-              启用钉钉通知
-            </label>
-          </div>
-          <button class="btn btn-primary" id="btn-save-notify">保存通知设置</button>
-        </div>
-      </section>
-
-      <!-- Panel: Chrome 连接 -->
-      <section class="panel" id="panel-chrome">
-        <div class="panel-header"><h2>Chrome 连接</h2></div>
-        <div class="form-section">
-          <p class="section-desc">监控需要通过 Chrome 访问京东店铺页面。<br/>Chrome 必须以远程调试模式运行（端口 9222）。</p>
-
+          <h3 class="subsection-title">Chrome 连接</h3>
           <div class="status-card" id="chrome-status-card">
             <div class="status-card-dot" id="chrome-dot"></div>
             <div class="status-card-text">
@@ -211,124 +279,43 @@
             </div>
           </div>
 
-          <div class="status-card" id="daemon-status-card">
-            <div class="status-card-dot" id="daemon-dot"></div>
-            <div class="status-card-text">
-              <strong>bb-browser Daemon</strong>
-              <span id="daemon-status-text">检测中…</span>
+          <div class="form-row">
+            <label class="form-label">CDP 端口</label>
+            <input type="number" class="form-input" id="cfg-cdp-port" value="9222" placeholder="9222" style="max-width:120px" />
+          </div>
+
+          <div class="form-row">
+            <label class="form-label">Chrome 路径（留空自动检测）</label>
+            <div class="path-row">
+              <input type="text" class="form-input" id="chrome-custom-path"
+                placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" />
+              <button class="btn btn-secondary" id="btn-browse-chrome">浏览…</button>
+              <button class="btn btn-secondary" id="btn-save-chrome-path">保存</button>
             </div>
           </div>
 
           <div class="btn-group">
-            <button class="btn btn-primary" id="btn-launch-chrome">启动 Chrome (CDP)</button>
-            <button class="btn btn-secondary" id="btn-check-chrome">刷新状态</button>
-            <button class="btn btn-secondary" id="btn-start-daemon">启动 Daemon</button>
-          </div>
-
-          <div class="form-divider"></div>
-          <h3 class="subsection-title">自定义浏览器路径（找不到时填写）</h3>
-          <div class="form-row chrome-path-row">
-            <input type="text" id="chrome-custom-path" placeholder="留空则自动检测，例: C:\Program Files\Google\Chrome\Application\chrome.exe" />
-            <button class="btn btn-secondary" id="btn-browse-chrome">浏览…</button>
-            <button class="btn btn-secondary" id="btn-save-chrome-path">保存</button>
+            <button class="btn btn-primary" id="btn-launch-chrome">启动 Chrome (CDP模式)</button>
+            <button class="btn btn-secondary" id="btn-check-chrome">测试连接</button>
           </div>
 
           <div class="hint-box">
-            <p>💡 点击"启动 Chrome"会自动：</p>
+            <p>点击「启动 Chrome」会自动：</p>
             <ol>
               <li>退出已打开的 Chrome（如有）</li>
-              <li>以 <code>--remote-debugging-port=9222</code> 重新打开 Chrome</li>
+              <li>以 <code>--remote-debugging-port=9222</code> 重新打开 Chrome 并导航到 Temu 运营后台</li>
             </ol>
-            <p>之后请在 Chrome 中<strong>登录京东账号</strong>，再返回此处运行巡检。</p>
+            <p>Chrome 启动后请<strong>登录 Temu 账号</strong>，再返回此处运行抓取任务。</p>
           </div>
         </div>
       </section>
 
-      <!-- Panel: 数据文件 -->
-      <section class="panel" id="panel-files">
-        <div class="panel-header">
-          <h2>数据文件</h2>
-          <button class="btn btn-secondary" id="btn-refresh-files">刷新</button>
-        </div>
-        <div class="file-list" id="file-list">
-          <div class="empty-state">暂无数据文件</div>
-        </div>
-      </section>
-
-      <!-- Panel: 定时任务 -->
-      <section class="panel" id="panel-cron">
-        <div class="panel-header">
-          <h2>定时任务</h2>
-          <button class="btn btn-secondary" id="btn-refresh-cron">刷新</button>
-        </div>
-        <div class="form-section">
-          <p class="section-desc">基于系统 crontab 管理定时巡检任务。</p>
-
-          <div class="cron-list" id="cron-list">
-            <div class="empty-state">暂无定时任务</div>
-          </div>
-
-          <div class="form-divider"></div>
-          <h3 class="subsection-title">新增定时任务</h3>
-          <div class="form-row">
-            <label>Cron 表达式</label>
-            <input type="text" id="cron-expr" placeholder="例: 0 9 * * 1-5" style="font-family:monospace" />
-          </div>
-          <div class="form-row">
-            <label>备注</label>
-            <input type="text" id="cron-comment" placeholder="例: 工作日早9点巡检" />
-          </div>
-          <div class="cron-presets">
-            <span class="preset-label">快速选择：</span>
-            <button class="btn-chip" data-expr="0 9 * * *">每天 9:00</button>
-            <button class="btn-chip" data-expr="0 9,18 * * *">每天 9:00 & 18:00</button>
-            <button class="btn-chip" data-expr="0 9 * * 1-5">工作日 9:00</button>
-            <button class="btn-chip" data-expr="0 */2 * * *">每 2 小时</button>
-          </div>
-          <button class="btn btn-primary" id="btn-cron-add">添加任务</button>
-        </div>
-      </section>
-
-
-      <!-- AI 助手面板 -->
-      <section class="panel ai-panel" id="panel-ai">
-        <div class="panel-header">
-          <h2>🤖 AI 助手</h2>
-          <div class="ai-key-bar">
-            <input type="password" id="ai-api-key" placeholder="MiniMax API Key（sk-...）" />
-            <button class="btn btn-secondary" id="btn-ai-save-key">保存 Key</button>
-          </div>
-        </div>
-
-        <div class="ai-body">
-          <div class="ai-messages" id="ai-messages">
-            <div class="ai-welcome">
-              <div class="ai-welcome-icon">🤖</div>
-              <p>你好！我是京东价格监控助手。</p>
-              <p class="ai-welcome-sub">可以帮你排查抓取问题、分析巡检结果、修改配置等。</p>
-            </div>
-          </div>
-
-          <div class="ai-chips">
-            <button class="btn-chip" data-prompt="帮我检查为什么抓取失败">抓取失败排查</button>
-            <button class="btn-chip" data-prompt="读取最新巡检结果并分析">分析巡检结果</button>
-            <button class="btn-chip" data-prompt="帮我检查当前配置是否正确">检查配置</button>
-            <button class="btn-chip" data-prompt="如何配置钉钉通知？">配置钉钉</button>
-          </div>
-
-          <div class="ai-input-row">
-            <textarea id="ai-input" placeholder="问我任何问题，例如：为什么抓取失败？如何配置钉钉？" rows="2"></textarea>
-            <button class="btn btn-primary ai-send-btn" id="btn-ai-send">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 8l12-6-5 6 5 6-12-6z" fill="currentColor"/></svg>
-              发送
-            </button>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
-  <script src="app.js"></script>
+  <!-- Global log panel (bottom drawer, shared across all task panels) -->
+  <div id="toast-container"></div>
 
+  <script src="app.js"></script>
 </body>
 </html>
