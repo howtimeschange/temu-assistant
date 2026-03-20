@@ -1,28 +1,12 @@
-dingtalk:
-  at_all: false
-  at_mobiles:
-  - SEC7e4c821d54f3e30e396bf6f08d729ac8dcebeaefaa3ac637dd36647cb5cbb2e2
-  secret: SEC7e4c821d54f3e30e396bf6f08d729ac8dcebeaefaa3ac637dd36647cb5cbb2e2
-  webhook_url: https://oapi.dingtalk.com/robot/send?access_token=e62b8e3563ca935cd42762730b370adefafed635dd35afc12845e020b741fa3c
-monitor:
-  concurrency: 3
-  delay_max_seconds: 3
-  delay_min_seconds: 1
-  interval_minutes: 120
-  page_timeout_seconds: 30
-  price_ratio_threshold: 0.5
-notification:
-  at_mobiles:
-  - '15557105783'
+temu:
+  cdp_port: "9222"
+  login_wait_seconds: 40
+
 output:
-  data_dir: data
-  excel_to_desktop: true
+  desktop: true          # 默认输出到桌面
+  data_dir: "data"       # 本地数据目录
+  log_dir: "logs"
   keep_days: 30
-  log_dir: logs
-  loop_export_excel: true
-shop:
-  shop_id: '1000462158'
-  shop_name: ASICS亚瑟士京东自营旗舰店
-  shop_url: https://mall.jd.com/index-1000462158.html
+
 startup:
-  login_wait_seconds: 30
+  login_wait_seconds: 40  # 首次启动等待登录的秒数
