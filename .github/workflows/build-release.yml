@@ -3,270 +3,164 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'          # 推 v1.0.0 这样的 tag 时触发
-  workflow_dispatch:   # 也支持手动触发
+      - 'v*'           # 推 v1.0.1 等 tag 时自动触发
+  workflow_dispatch:   # 支持手动触发
 
 permissions:
-  contents: write      # 允许创建 Release 和上传文件
+  contents: write
 
 jobs:
-  # ── macOS DMG ──────────────────────────────────────────────────────────────
+  # ─── macOS (arm64 + x64) ─────────────────────────────────────────────────
   build-mac:
-    runs-on: macos-14   # Apple Silicon runner
+    runs-on: macos-14   # Apple Silicon
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: electron-app/package-lock.json
 
-      - name: Install dependencies
+      - name: Install npm deps
+        run: cd electron-app && npm ci
+
+      - name: Download bundled Python (all mac arches)
+        run: |
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260310"
+          DIST="electron-app/python-dist"
+          mkdir -p "$DIST/mac-arm64" "$DIST/mac-x64"
+
+          echo "⬇️ Python arm64..."
+          curl -L -o /tmp/py_arm64.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-aarch64-apple-darwin-install_only_stripped.tar.gz"
+          tar -xzf /tmp/py_arm64.tar.gz -C "$DIST/mac-arm64" --strip-components=1
+
+          echo "⬇️ Python x64..."
+          curl -L -o /tmp/py_x64.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-apple-darwin-install_only_stripped.tar.gz"
+          tar -xzf /tmp/py_x64.tar.gz -C "$DIST/mac-x64" --strip-components=1
+
+          echo "📦 Installing openpyxl..."
+          "$DIST/mac-arm64/bin/pip3" install openpyxl --quiet
+          "$DIST/mac-x64/bin/pip3" install openpyxl --quiet
+
+          echo "✅ Done: $(du -sh $DIST/mac-arm64 $DIST/mac-x64 | awk '{print $1, $2}')"
+
+      - name: Build macOS DMG (arm64 + x64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
           cd electron-app
-          npm ci
+          npx electron-builder --mac dmg --config build.yml --publish never
 
-      - name: Download bundled Python (arm64)
-        run: bash electron-app/scripts/download-python.sh
-
-      - name: Install bb-browser dependencies (standalone)
+      - name: Verify Python bundled in arm64 DMG
         run: |
-          # bb-browser 需要独立的 node_modules，否则打包后找不到依赖
-          cd electron-app/node_modules/bb-browser
-          npm install --production --no-package-lock 2>/dev/null
-          cd ../..
-          echo "Done. node_modules size:"
-          du -sh node_modules/bb-browser/node_modules
+          hdiutil attach "electron-app/dist/Temu Assistant-1.0.0-arm64.dmg" \
+            -readonly -quiet -mountpoint /tmp/verify_dmg
+          ls "/tmp/verify_dmg/Temu Assistant.app/Contents/Resources/" | grep python \
+            && echo "✅ python dir found" || echo "❌ python dir missing"
+          hdiutil detach /tmp/verify_dmg -quiet
 
-      - name: Build macOS DMG
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: |
-          npx --prefix electron-app electron-builder \
-            --mac dmg \
-            --arm64 \
-            --publish never \
-            --config electron-app/electron-builder.yml
-
-      - name: Build macOS DMG (x64)
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: |
-          # Download x64 python
-          ARCH=x86_64 bash electron-app/scripts/download-python.sh || true
-          # x64 build 也需要 bb-browser 依赖（用子 shell 避免 cd 影响后续命令）
-          (cd electron-app/node_modules/bb-browser && npm install --production --no-package-lock 2>/dev/null || true)
-          npx --prefix electron-app electron-builder \
-            --mac dmg \
-            --x64 \
-            --publish never \
-            --config electron-app/electron-builder.yml
-
-      - name: Inject fix script into DMGs
-        run: |
-          python3 - <<'PYEOF'
-          import os, shutil, subprocess, glob, tempfile
-
-          script_src = "electron-app/assets/fix-mac-quarantine.command"
-          script_dst_name = "🔧 首次打开必读 - 修复已损坏.command"
-
-          dmgs = glob.glob("electron-app/dist/*.dmg")
-          print(f"Found DMGs: {dmgs}")
-
-          for dmg in dmgs:
-              print(f"\nProcessing: {dmg}")
-              with tempfile.TemporaryDirectory() as tmpdir:
-                  mnt = os.path.join(tmpdir, "mnt")
-                  staging = os.path.join(tmpdir, "staging")
-                  os.makedirs(mnt)
-                  os.makedirs(staging)
-
-                  # Mount
-                  r = subprocess.run(
-                      ["hdiutil", "attach", dmg, "-readonly", "-noverify",
-                       "-noautoopen", "-mountpoint", mnt],
-                      capture_output=True, text=True
-                  )
-                  if r.returncode != 0:
-                      print(f"  Mount failed: {r.stderr}")
-                      continue
-
-                  # Copy contents to staging
-                  for item in os.listdir(mnt):
-                      src = os.path.join(mnt, item)
-                      dst = os.path.join(staging, item)
-                      if os.path.islink(src):
-                          link_target = os.readlink(src)
-                          os.symlink(link_target, dst)
-                      elif os.path.isdir(src):
-                          shutil.copytree(src, dst, symlinks=True)
-                      else:
-                          shutil.copy2(src, dst)
-
-                  # Unmount
-                  subprocess.run(["hdiutil", "detach", mnt, "-quiet"],
-                                 capture_output=True)
-
-                  # Add fix script
-                  fix_dst = os.path.join(staging, script_dst_name)
-                  shutil.copy2(script_src, fix_dst)
-                  os.chmod(fix_dst, 0o755)
-                  # 清除 quarantine 扩展属性，否则用户双击该脚本时 Gatekeeper 也会拦截
-                  subprocess.run(["xattr", "-cr", fix_dst], capture_output=True)
-                  print(f"  Added fix script (quarantine cleared): {script_dst_name}")
-
-                  # Repack — hdiutil auto-appends .dmg, so use a name without it
-                  new_dmg_base = dmg + ".new"
-                  r = subprocess.run(
-                      ["hdiutil", "create",
-                       "-volname", "JD Price Monitor",
-                       "-srcfolder", staging,
-                       "-ov", "-format", "UDZO",
-                       new_dmg_base],
-                      capture_output=True, text=True
-                  )
-                  if r.returncode != 0:
-                      print(f"  Create failed: {r.stderr}")
-                      continue
-
-                  # hdiutil appends .dmg automatically
-                  actual_new = new_dmg_base if os.path.exists(new_dmg_base) else new_dmg_base + ".dmg"
-                  os.replace(actual_new, dmg)
-                  print(f"  Done: {dmg}")
-
-          PYEOF
-
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: mac-dist
           path: electron-app/dist/*.dmg
-          retention-days: 1
+          retention-days: 3
 
-  # ── Windows EXE ────────────────────────────────────────────────────────────
+  # ─── Windows x64 ─────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: electron-app/package-lock.json
 
-      - name: Install dependencies
+      - name: Install npm deps
+        run: cd electron-app && npm ci
+
+      - name: Download bundled Python (win-x64)
+        shell: bash
+        run: |
+          BASE="https://github.com/astral-sh/python-build-standalone/releases/download/20260310"
+          DIST="electron-app/python-dist"
+          mkdir -p "$DIST/win-x64"
+
+          echo "⬇️ Python win-x64..."
+          curl -L -o /tmp/py_win.tar.gz \
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+          tar -xzf /tmp/py_win.tar.gz -C "$DIST/win-x64" --strip-components=1
+
+          # openpyxl: 纯 Python 包，从 mac-arm64 直接 copy 最快（但 CI 上没有）
+          # 改用 pip 直接安装到 Lib/site-packages
+          # Windows runner 有 Python3，用它来 pip install 到目标目录
+          WIN_SITE="$DIST/win-x64/Lib/site-packages"
+          mkdir -p "$WIN_SITE"
+          pip install openpyxl --target "$WIN_SITE" --quiet
+          echo "✅ openpyxl installed to win-x64"
+
+      - name: Build Windows NSIS installer
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: |
           cd electron-app
-          npm ci
+          npx electron-builder --win nsis --x64 --config build.yml --publish never
 
-      - name: Download bundled Python (Windows x64)
-        shell: pwsh
-        run: |
-          $PYTHON_VERSION = "3.11.9"
-          $PYTHON_RELEASE = "20240814"
-          $FILENAME = "cpython-$PYTHON_VERSION+$PYTHON_RELEASE-x86_64-pc-windows-msvc-install_only.tar.gz"
-          $URL = "https://github.com/indygreg/python-build-standalone/releases/download/$PYTHON_RELEASE/$FILENAME"
-          $DEST = "electron-app/resources/python"
-          
-          if (Test-Path "$DEST/python.exe") {
-            Write-Host "Python already present, skipping"
-            exit 0
-          }
-          
-          Write-Host "Downloading Python $PYTHON_VERSION for Windows x64..."
-          $TMP = [System.IO.Path]::GetTempFileName() + ".tar.gz"
-          Invoke-WebRequest -Uri $URL -OutFile $TMP
-          
-          New-Item -ItemType Directory -Force -Path $DEST | Out-Null
-          tar -xzf $TMP -C $DEST --strip-components=1
-          Remove-Item $TMP
-          
-          Write-Host "Python installed to $DEST"
-          Get-ChildItem $DEST
-
-      - name: Install Python dependencies
-        shell: pwsh
-        run: |
-          $PIP = "electron-app/resources/python/python.exe"
-          & $PIP -m pip install --upgrade pip --quiet
-          & $PIP -m pip install -r requirements.txt --quiet
-          & $PIP -m pip install fastapi uvicorn httpx --quiet
-
-      - name: Install bb-browser dependencies (standalone)
-        shell: pwsh
-        run: |
-          # bb-browser 需要独立的 node_modules，否则打包后找不到依赖
-          $BB_DIR = "electron-app/node_modules/bb-browser"
-          Write-Host "Installing bb-browser dependencies in $BB_DIR..."
-          Push-Location $BB_DIR
-          npm install --production --no-package-lock 2>&1
-          Pop-Location
-          Write-Host "Done. node_modules size:"
-          (Get-ChildItem "$BB_DIR/node_modules" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          npx --prefix electron-app electron-builder --win nsis --x64 --publish never --config electron-app/electron-builder.yml
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: win-dist
           path: electron-app/dist/*.exe
-          retention-days: 1
+          retention-days: 3
 
-  # ── Create GitHub Release ──────────────────────────────────────────────────
+  # ─── Create GitHub Release ────────────────────────────────────────────────
   release:
     needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: mac-dist
-          path: dist/mac
+          path: dist/
 
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: win-dist
-          path: dist/win
+          path: dist/
 
       - name: List artifacts
-        run: ls -lh dist/mac/ dist/win/
+        run: ls -lh dist/
 
-      - name: Create GitHub Release
+      - name: Create / Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "JD Price Monitor ${{ github.ref_name }}"
+          name: "Temu Assistant ${{ github.ref_name }}"
           body: |
-            ## 📦 下载
+            ## 📦 下载安装包
 
             | 平台 | 文件 | 说明 |
             |------|------|------|
-            | macOS (Apple Silicon) | `*-arm64.dmg` | M1/M2/M3/M4 Mac |
+            | macOS (Apple Silicon M1-M4) | `*-arm64.dmg` | 推荐 |
             | macOS (Intel) | `*-x64.dmg` | Intel Mac |
-            | Windows | `*-Setup.exe` | Windows 10/11 x64 |
+            | Windows 10/11 | `*Setup*.exe` | x64 |
 
-            ## 使用前提
+            ## ✅ 开箱即用
+            - 无需安装 Python 或 Node.js
+            - 内置 CPython 3.12.13 + openpyxl
 
-            - Chrome 浏览器（App 内一键启动调试模式）
-            - 首次使用需在 Chrome 中登录京东账号
+            ## 🚀 使用前提
+            - Chrome 浏览器（用于 CDP 抓取）
+            - 在 Chrome 中登录 Temu 账号后，点击对应功能开始抓取
 
-            ## 更新内容
+            ## 📋 功能
+            - 商品数据 / 售后数据 / 店铺评价 / 店铺商品 → 导出 Excel
 
-            详见 [CHANGELOG](https://github.com/howtimeschange/jd-price-monitor/commits/main)
-          files: |
-            dist/mac/*.dmg
-            dist/win/*.exe
+          files: dist/*
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
