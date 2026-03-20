@@ -324,12 +324,18 @@ async function refreshChromeStatus() {
 }
 
 document.getElementById('btn-launch-chrome').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-launch-chrome')
+  if (btn.disabled) return
+  btn.disabled = true
+  btn.textContent = '启动中…'
   const customPath = document.getElementById('chrome-custom-path').value.trim()
   appendLogAll('[chrome] 正在启动 Chrome (CDP)…')
   const r = await api.launchChrome(customPath || undefined)
   appendLogAll(`[chrome] ${r.msg}`)
   await refreshChromeStatus()
-  showToast(r.ok ? 'Chrome 已启动' : `启动失败: ${r.msg}`)
+  showToast(r.ok ? '✅ Chrome 已启动，请在 Chrome 中登录 Temu 账号' : `❌ 启动失败: ${r.msg}`)
+  btn.disabled = false
+  btn.textContent = '启动 Chrome (CDP模式)'
 })
 
 document.getElementById('btn-check-chrome').addEventListener('click', async () => {

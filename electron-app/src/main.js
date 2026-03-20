@@ -305,9 +305,15 @@ async function launchChrome(port = CDP_PORT, customPath = '') {
       await new Promise(r => setTimeout(r, 2500))
     } catch (_) {}
 
-    log(`[chrome] 启动 Chrome --remote-debugging-port=${port}`)
+    // Chrome v115+ 需要 --user-data-dir 才能开 CDP
+    const os = require('os')
+    const userDataDir = path.join(os.homedir(), '.temu-assistant', 'chrome-profile')
+    fs.mkdirSync(userDataDir, { recursive: true })
+
+    log(`[chrome] 启动 Chrome --remote-debugging-port=${port} --user-data-dir=${userDataDir}`)
     const chromeProc = spawn(chromePath, [
       `--remote-debugging-port=${port}`,
+      `--user-data-dir=${userDataDir}`,
       '--no-first-run',
       '--no-default-browser-check',
       'https://agentseller.temu.com/',
@@ -505,10 +511,34 @@ ipcMain.handle('save-config', async (_, cfg) => {
   }
 })
 
+// ensure-chrome: 检查 CDP，没开就自动启动
+ipcMain.handle('ensure-chrome', async () => {
+  const ok = await probeTcp(CDP_PORT)
+  if (ok) return { ok: true, msg: 'Chrome CDP 已就绪' }
+
+  log('[chrome] CDP 未就绪，自动启动 Chrome...')
+  const saved = loadChromePath()
+  const result = await launchChrome(CDP_PORT, saved)
+  return result
+})
+
 // run-task: 接收 { task, params } 派发对应的 temu_*.py
 ipcMain.handle('run-task', async (_, task, params) => {
   if (runningProcess) {
     return { ok: false, msg: '已有任务在运行，请先停止当前任务' }
+  }
+
+  // 自动确保 Chrome CDP 就绪
+  const cdpOk = await probeTcp(CDP_PORT)
+  if (!cdpOk) {
+    log('[pre-task] CDP 未就绪，自动启动 Chrome...')
+    sendStatus('chrome', false)
+    const saved = loadChromePath()
+    const r = await launchChrome(CDP_PORT, saved)
+    if (!r.ok) {
+      return { ok: false, msg: `Chrome 启动失败：${r.msg}\n请手动以 CDP 模式启动 Chrome 后重试` }
+    }
+    log('[pre-task] Chrome CDP 就绪，开始任务')
   }
 
   let scriptName = ''

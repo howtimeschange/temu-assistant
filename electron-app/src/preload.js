@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   // Chrome CDP
   launchChrome: (path) => ipcRenderer.invoke('launch-chrome', path),
   checkChrome: () => ipcRenderer.invoke('check-chrome'),
+  ensureChrome: () => ipcRenderer.invoke('ensure-chrome'),
   getChromePath: () => ipcRenderer.invoke('get-chrome-path'),
   saveChromePath: (p) => ipcRenderer.invoke('save-chrome-path', p),
   browseChromePath: () => ipcRenderer.invoke('browse-chrome-path'),
