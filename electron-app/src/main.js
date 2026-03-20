@@ -13,11 +13,39 @@ const { spawn, execSync } = require('child_process')
 // ── Path helpers ──────────────────────────────────────────────────────────────
 function isPkg() { return app.isPackaged }
 
+/**
+ * 清理 Temu mall URL，只保留 mall_id 参数，去掉 tracking 参数
+ * 例: https://www.temu.com/mall.html?mall_id=634418214560482&refer_page_name=...
+ *  → https://www.temu.com/mall.html?mall_id=634418214560482
+ */
+function cleanMallUrl(url) {
+  try {
+    const u = new URL(url)
+    const mallId = u.searchParams.get('mall_id')
+    if (mallId) {
+      return `${u.origin}${u.pathname}?mall_id=${mallId}`
+    }
+  } catch { /* invalid url, return as-is */ }
+  return url
+}
 function getPythonBin() {
   if (isPkg()) {
+    // 优先用打包进来的 Python
     const winBin  = path.join(process.resourcesPath, 'python', 'python.exe')
     const unixBin = path.join(process.resourcesPath, 'python', 'bin', 'python3')
-    return process.platform === 'win32' ? winBin : unixBin
+    const bundled = process.platform === 'win32' ? winBin : unixBin
+    if (fs.existsSync(bundled)) return bundled
+    // fallback：系统 Python
+    const systemCandidates = process.platform === 'win32'
+      ? ['python', 'python3']
+      : ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3', 'python3']
+    for (const p of systemCandidates) {
+      try {
+        if (p.startsWith('/') && !fs.existsSync(p)) continue
+        return p
+      } catch { /* skip */ }
+    }
+    return process.platform === 'win32' ? 'python' : 'python3'
   }
   // dev: prefer project venv if it exists
   const venvPy = path.join(__dirname, '..', '..', 'venv', 'bin', 'python3')
@@ -564,13 +592,13 @@ ipcMain.handle('run-task', async (_, task, params) => {
     case 'reviews': {
       scriptName = 'temu_reviews.py'
       if (!params.shop_url) return { ok: false, msg: '请提供店铺链接' }
-      args = ['--url', params.shop_url]
+      args = ['--url', cleanMallUrl(params.shop_url)]
       break
     }
     case 'store-items': {
       scriptName = 'temu_store_items.py'
       if (!params.shop_url) return { ok: false, msg: '请提供店铺链接' }
-      args = ['--url', params.shop_url]
+      args = ['--url', cleanMallUrl(params.shop_url)]
       break
     }
     default:
