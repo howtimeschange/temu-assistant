@@ -125,7 +125,9 @@ def close_popup(tab: str) -> dict:
 
 def install_temu_adapters():
     """将 temu adapters 安装到 bb-browser sites 目录"""
-    adapter_src = os.path.join(os.path.dirname(__file__), "adapters", "temu")
+    # __file__ 是 src/temu_utils.py，adapters/ 在项目根（上一级）
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    adapter_src = os.path.join(project_root, "adapters", "temu")
     bb_root = os.path.expanduser("~/.bb-browser/sites/temu")
     os.makedirs(bb_root, exist_ok=True)
     for fname in os.listdir(adapter_src):

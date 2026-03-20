@@ -167,10 +167,21 @@ def run(mode: str = "current", regions: list = None, output_path: str = None,
 
 if __name__ == "__main__":
     import argparse
+
+    # 英文 key → 中文（兼容 Electron 传过来的 global/us/eu）
+    REGION_ALIAS = {"global": "全球", "us": "美国", "eu": "欧区"}
+    ALL_REGION_CHOICES = list(REGIONS.keys()) + list(REGION_ALIAS.keys())
+
     parser = argparse.ArgumentParser(description="Temu 售后数据抓取")
     parser.add_argument("--mode", choices=["current", "new"], default="current")
-    parser.add_argument("--regions", nargs="+", choices=list(REGIONS.keys()), default=None)
+    parser.add_argument("--regions", nargs="+", choices=ALL_REGION_CHOICES, default=None)
     parser.add_argument("--output", default=None)
     parser.add_argument("--wait",  type=int, default=40)
     args = parser.parse_args()
-    run(mode=args.mode, regions=args.regions, output_path=args.output, login_wait=args.wait)
+
+    # 把英文 alias 转成中文
+    regions = None
+    if args.regions:
+        regions = [REGION_ALIAS.get(r, r) for r in args.regions]
+
+    run(mode=args.mode, regions=regions, output_path=args.output, login_wait=args.wait)
