@@ -1,165 +1,221 @@
 """
-Temu 运营助手 — 站点商品数据抓取（Items tab）
-忽略 Explore Temu's picks 栏目，支持 See More 自动点击 + 翻页
+Temu 运营助手 — 店铺商品抓取
+页面: https://www.temu.com/mall.html?mall_id=xxx
+使用 CDP WebSocket 直连，点击「商品/Items」tab 后翻页抓取
 """
 import sys
 import os
 import time
+import re
 
 sys.path.insert(0, os.path.dirname(__file__))
 from src.temu_utils import (
-    bb, bb_json, get_tab_by_domain, open_new_tab, navigate_tab,
-    wait_for_selector, click_next_page, install_temu_adapters,
-    desktop_path, timestamped_name
+    install_temu_adapters, desktop_path, timestamped_name,
+    cdp_eval, cdp_navigate, get_tab_ws_url
 )
 from src.temu_excel import write_temu_excel
 
-DOMAIN = "www.temu.com"
-LOGIN_WAIT = 40
+DOMAIN = "temu.com"
 
 
-def click_items_tab(tab: str) -> bool:
-    """点击 Items tab"""
+def click_items_tab(ws_url: str) -> bool:
+    """点击「商品/Items」导航 tab"""
     js = """
     (function() {
-      const tabs = Array.from(document.querySelectorAll('[role="tab"], [class*="tab"], button, a, li'));
-      const itemTab = tabs.find(el => /^items?$/i.test(el.innerText.trim()) && el.offsetParent !== null);
-      if (itemTab) {
-        itemTab.click();
-        return true;
+      var navItems = document.querySelectorAll('h2._2kIA1PhC, h2[class*="_2kIA1PhC"]');
+      for (var i = 0; i < navItems.length; i++) {
+        var txt = navItems[i].innerText.trim();
+        if (txt === '商品' || txt === 'Items' || txt.toLowerCase() === 'items') {
+          navItems[i].click();
+          return 'clicked:' + txt;
+        }
+      }
+      return 'not-found';
+    })()
+    """
+    r = cdp_eval(ws_url, js)
+    return str(r).startswith('clicked:')
+
+
+def scrape_items_page(ws_url: str) -> list:
+    """抓取当前页所有商品"""
+    js = """
+    (function() {
+      var results = [];
+      // 商品卡片容器：div._6q6qVUF5._1UrrHYym（包含图片+名称+价格+销量）
+      var cards = document.querySelectorAll('div._6q6qVUF5._1UrrHYym');
+      if (cards.length === 0) {
+        // 降级：找包含「已售」和商品链接的容器
+        var allDivs = document.querySelectorAll('div[data-tooltip*="goodContainer"]');
+        if (allDivs.length > 0) cards = allDivs;
+      }
+
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var r = {};
+
+        // 商品链接（href 含 -g-）
+        var linkEl = card.querySelector('a[href*="-g-"]');
+        r.url = linkEl ? linkEl.href : '';
+
+        // 商品名（data-tooltip-title 最可靠）
+        r.name = card.getAttribute('data-tooltip-title') || '';
+        if (!r.name && linkEl) {
+          r.name = linkEl.innerText.trim().replace(/在新标签页中打开。/g, '').trim().split('\\n')[0];
+        }
+
+        // 图片（找主图，data-js-main-img=true 或最大尺寸的）
+        var mainImg = card.querySelector('img[data-js-main-img="true"]') || card.querySelector('img[src*="kwcdn"]');
+        r.image = mainImg ? mainImg.src : '';
+
+        // 价格（找所有文字节点，匹配货币格式）
+        var allEls = card.querySelectorAll('*');
+        var prices = [];
+        for (var j = 0; j < allEls.length; j++) {
+          var el = allEls[j];
+          var txt = el.children.length === 0 && el.innerText ? el.innerText.trim() : '';
+          if (txt.match(/^[A-Z]{0,3}\\$[\\d\\.]+$/) || txt.match(/^[¥€£][\\d,\\.]+$/)) {
+            prices.push(txt);
+          }
+        }
+        // 去重，第一个是现价，第二个（如果有）是原价
+        var unique = prices.filter(function(v, i, a) { return a.indexOf(v) === i; });
+        r.price = unique[0] || '';
+        r.originalPrice = unique[1] || '';
+
+        // 销量
+        var soldEl = card.querySelector('._2XgTiMJi, [class*="soldCount"], [class*="sold_count"]');
+        if (!soldEl) {
+          // 降级：找含「已售」的叶子节点
+          for (var j = 0; j < allEls.length; j++) {
+            var t = allEls[j].children.length === 0 && allEls[j].innerText ? allEls[j].innerText.trim() : '';
+            if (t.match(/^已售\\d/) || t.toLowerCase().match(/^\\d.*sold/)) {
+              r.sold = t; break;
+            }
+          }
+        } else {
+          r.sold = soldEl.innerText.trim();
+        }
+
+        // goods_id from URL or data-tooltip
+        var tooltip = card.getAttribute('data-tooltip') || '';
+        var m1 = tooltip.match(/goodContainer-(\\d+)/);
+        r.goodsId = m1 ? m1[1] : (r.url.match(/g-(\\d+)\\.html/) || ['', ''])[1];
+
+        if (r.name || r.url) results.push(r);
+      }
+      return results;
+    })()
+    """
+    result = cdp_eval(ws_url, js)
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def has_next_page(ws_url: str) -> bool:
+    js = """
+    (function() {
+      var next = document.querySelector('li.temu-pagination-next');
+      if (!next) return false;
+      return next.getAttribute('aria-disabled') !== 'true' && !next.classList.contains('temu-pagination-disabled');
+    })()
+    """
+    return bool(cdp_eval(ws_url, js))
+
+
+def click_next_page(ws_url: str) -> bool:
+    js = """
+    (function() {
+      var next = document.querySelector('li.temu-pagination-next');
+      if (next && next.getAttribute('aria-disabled') !== 'true') {
+        next.click(); return true;
       }
       return false;
     })()
     """
-    r = bb(["eval", js, "--tab", tab], timeout=10)
-    return r.stdout.strip().lower() == 'true'
+    return bool(cdp_eval(ws_url, js))
 
 
-def click_see_more(tab: str) -> bool:
-    """点击 See More 按钮"""
-    js = """
-    (function() {
-      const btns = Array.from(document.querySelectorAll('button, [role="button"], a, span'))
-        .filter(el => /see more/i.test(el.innerText) && el.offsetParent !== null);
-      if (btns.length > 0) {
-        btns[0].click();
-        return true;
-      }
-      return false;
-    })()
-    """
-    r = bb(["eval", js, "--tab", tab], timeout=10)
-    return r.stdout.strip().lower() == 'true'
+def wait_items_load(ws_url: str, old_count: int, timeout: int = 8) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(0.5)
+        count = cdp_eval(ws_url, "document.querySelectorAll('div._6q6qVUF5._1UrrHYym').length")
+        if isinstance(count, int) and count != old_count:
+            time.sleep(0.3)
+            return True
+    return False
 
 
-def scrape_all_pages(tab: str, print_fn=print) -> list:
-    """循环抓取所有商品分页"""
-    all_items = []
-    page = 1
-
-    while True:
-        print_fn(f"  第 {page} 页...")
-
-        # 先尝试点 See More
-        if click_see_more(tab):
-            print_fn("  ↳ 点击 See More 加载更多...")
-            time.sleep(2)
-
-        data = bb_json(["site", "temu/store-items"])
-
-        if "error" in data:
-            print_fn(f"  ⚠️  抓取出错: {data['error']}")
-            break
-
-        items = data.get("items", [])
-        all_items.extend(items)
-        print_fn(f"  ✓ 获取 {len(items)} 件商品（累计 {len(all_items)}）")
-
-        if not data.get("hasNextPage", False):
-            break
-
-        clicked = click_next_page(tab)
-        if not clicked:
-            # 尝试滚动到底部触发加载
-            bb(["eval", "window.scrollTo(0, document.body.scrollHeight)", "--tab", tab])
-            time.sleep(2.5)
-            data2 = bb_json(["site", "temu/store-items"])
-            new_items = data2.get("items", [])
-            if len(new_items) <= len(items):
-                print_fn("  ↳ 无更多商品，停止")
-                break
-            all_items.extend(new_items[len(items):])
-        else:
-            time.sleep(2.5)
-
-        page += 1
-
-    return all_items
-
-
-def run(shop_url: str, output_path: str = None, login_wait: int = LOGIN_WAIT, print_fn=print):
+def run(mall_url: str = "", output_path: str = None, print_fn=print):
     install_temu_adapters()
 
     if output_path is None:
         output_path = desktop_path(timestamped_name("temu_store_items"))
 
-    print_fn(f"🔗 打开店铺链接: {shop_url}")
-    tab = get_tab_by_domain(DOMAIN)
-
-    if tab:
-        navigate_tab(tab, shop_url)
-    else:
-        tab = open_new_tab(shop_url)
-
-    time.sleep(3)
-
-    # 检查登录验证
-    js_check = """document.querySelector('[class*="login"], [class*="verify"]') ? 'need-login' : 'ok'"""
-    r = bb(["eval", js_check, "--tab", tab], timeout=8)
-    if "need-login" in (r.stdout or ""):
-        print_fn(f"⏳ 检测到登录验证，请在 {login_wait}s 内完成操作...")
-        time.sleep(login_wait)
-
-    print_fn("🔍 等待页面加载...")
-    time.sleep(2)
-
-    # 点击 Items tab
-    print_fn("📦 点击 Items tab...")
-    for _ in range(3):
-        if click_items_tab(tab):
-            print_fn("  ✓ 已点击 Items tab")
-            break
-        time.sleep(1)
-    else:
-        print_fn("  ⚠️  未找到 Items tab，继续尝试抓取当前页...")
-
-    time.sleep(2.5)
-    wait_for_selector(tab, '[class*="goods"], [class*="product"], [class*="item"]', max_wait=15)
-
-    print_fn("🚀 开始抓取商品数据...")
-    items = scrape_all_pages(tab, print_fn)
-
-    if not items:
-        print_fn("⚠️  未抓取到商品数据")
+    ws_url = get_tab_ws_url(DOMAIN)
+    if not ws_url:
+        print_fn("❌ 未找到 temu.com 的 tab，请先在 Chrome 中打开店铺页面")
         return None
 
-    headers = ["商品名", "价格", "原价", "评分", "评价数", "商品链接", "图片URL"]
-    rows = [
-        [i.get("name",""), i.get("price",""), i.get("originalPrice",""),
-         i.get("rating",""), i.get("reviewCount",""), i.get("href",""), i.get("imgSrc","")]
-        for i in items
-    ]
+    if mall_url:
+        print_fn(f"🔍 导航到店铺页面...")
+        cdp_navigate(ws_url, mall_url)
+        time.sleep(3)
 
-    write_temu_excel(output_path, [{"title": "店铺商品", "headers": headers, "rows": rows}])
-    print_fn(f"\n✅ 完成！共 {len(rows)} 件商品（已排除 Explore Temu's picks），文件:\n   {output_path}")
+    # 点击「商品」tab
+    print_fn("📦 点击「商品」tab...")
+    ok = click_items_tab(ws_url)
+    if not ok:
+        print_fn("⚠️ 未找到商品 tab，尝试继续抓取当前内容...")
+    time.sleep(2)
+
+    # 抓取所有页
+    headers = ["商品名称", "商品链接", "价格", "原价", "商品图片", "销量", "goods_id"]
+    all_rows = []
+    page = 1
+
+    while True:
+        print_fn(f"  正在抓取第 {page} 页...")
+        old_count = cdp_eval(ws_url, "document.querySelectorAll('div._6q6qVUF5._1UrrHYym').length")
+        items = scrape_items_page(ws_url)
+        print_fn(f"  ✓ 第 {page} 页获取 {len(items)} 条")
+
+        for item in items:
+            all_rows.append([
+                item.get('name', ''),
+                item.get('url', ''),
+                item.get('price', ''),
+                item.get('originalPrice', ''),
+                item.get('image', ''),
+                item.get('sold', ''),
+                item.get('goodsId', ''),
+            ])
+
+        if not has_next_page(ws_url):
+            print_fn("  ↳ 已是最后一页")
+            break
+
+        cur_count = cdp_eval(ws_url, "document.querySelectorAll('div._6q6qVUF5._1UrrHYym').length")
+        click_next_page(ws_url)
+        wait_items_load(ws_url, cur_count if isinstance(cur_count, int) else 0)
+        page += 1
+        time.sleep(0.5)
+
+    if not all_rows:
+        print_fn("⚠️ 未抓取到商品数据")
+        return None
+
+    write_temu_excel(output_path, [{"title": "店铺商品", "headers": headers, "rows": all_rows}])
+    print_fn(f"\n✅ 完成！共 {len(all_rows)} 条，已保存到:\n   {output_path}")
     return output_path
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Temu 站点商品抓取")
-    parser.add_argument("url", help="店铺链接")
+    parser = argparse.ArgumentParser(description="Temu 店铺商品抓取")
+    parser.add_argument("--url", default="", help="店铺 URL（mall.html?mall_id=xxx）")
     parser.add_argument("--output", default=None)
-    parser.add_argument("--wait", type=int, default=40)
     args = parser.parse_args()
-    run(shop_url=args.url, output_path=args.output, login_wait=args.wait)
+    run(mall_url=args.url, output_path=args.output)
