@@ -58,6 +58,9 @@ extraResources:
       - config.yaml
       - "src/**/*.py"
       - "adapters/**/*.js"
+  # Python 依赖（openpyxl 等），打包后由 PYTHONPATH 注入
+  - from: "python-vendor"
+    to: python-scripts/vendor
   # ws node module alongside python-scripts (so _find_ws_module can find it)
   - from: "node_modules/ws"
     to: python-scripts/node_modules/ws

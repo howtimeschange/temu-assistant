@@ -67,16 +67,7 @@ ws.on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
 setTimeout(() => {{ process.exit(1); }}, {timeout * 1000});
 """
 
-    # 找 node 可执行路径
-    node_bin = _find_node()
-    # 找 ws 模块路径
-    ws_path = _find_ws_module()
-
-    result = subprocess.run(
-        [node_bin, "--input-type=module" if False else "-e", node_script],
-        capture_output=True, text=False, timeout=timeout + 2,
-        cwd=ws_path
-    )
+    result = _run_node(["-e", node_script], timeout=timeout + 2)
     if result.returncode != 0 or not result.stdout.strip():
         return None
     try:
@@ -97,81 +88,45 @@ ws.on('open', () => {{
 ws.on('error', e => {{ process.exit(1); }});
 setTimeout(() => process.exit(0), 3000);
 """
-    node_bin = _find_node()
-    ws_path = _find_ws_module()
-    subprocess.run([node_bin, "-e", node_script], capture_output=True, timeout=5, cwd=ws_path)
+    _run_node(["-e", node_script], timeout=5)
     if wait:
         time.sleep(wait)
 
 
 def _find_node() -> str:
-    """找真正的 node 可执行路径（不能是 Electron 自身）"""
-    # 优先用环境变量（Electron main.js 可设置真实 node 路径）
-    node_env = os.environ.get("TEMU_NODE_BIN") or os.environ.get("ELECTRON_NODE_BIN")
+    """找 node 可执行路径。
+    优先用 TEMU_NODE_BIN（Electron 传入的 process.execPath），
+    结合 ELECTRON_RUN_AS_NODE=1 可让 Electron 以纯 Node 模式运行脚本。
+    """
+    node_env = os.environ.get("TEMU_NODE_BIN")
     if node_env and os.path.exists(node_env):
-        # 验证不是 Electron（文件名不含 electron 也不含 app 名）
-        basename = os.path.basename(node_env).lower()
-        if "electron" not in basename and "temu" not in basename:
-            return node_env
-
-    # 常见系统 node 路径（macOS + Linux）
-    candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
-        os.path.expanduser("~/.nvm/versions/node/*/bin/node"),
-        "/usr/local/nvm/versions/node/*/bin/node",
-    ]
-    import glob
-    for pattern in candidates:
-        if '*' in pattern:
-            matches = glob.glob(pattern)
-            if matches:
-                return sorted(matches)[-1]  # 最新版本
-        elif os.path.exists(pattern):
-            return pattern
-
-    # 最后用 PATH 里的 node，但验证它不是 Electron
-    try:
-        result = subprocess.run(["which", "node"], capture_output=True, text=True, timeout=3)
-        if result.returncode == 0:
-            path = result.stdout.strip()
-            basename = os.path.basename(path).lower()
-            if path and "electron" not in basename and "temu" not in basename:
-                return path
-    except Exception:
-        pass
-
-    return "/opt/homebrew/bin/node"  # macOS 默认 fallback
+        return node_env
+    # 开发模式 fallback：系统 node
+    for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]:
+        if os.path.exists(p):
+            return p
+    return "node"
 
 
-def _find_ws_module() -> str:
-    """找包含 ws 模块的 node_modules 目录（兼容打包和开发模式）"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # 打包后：script_dir = .../Resources/python-scripts/src
-    # 开发时：script_dir = .../temu-assistant/src
+def _run_node(args: list, cwd: str = None, timeout: int = 10, extra_env: dict = None):
+    """运行 node 脚本。若 TEMU_NODE_BIN 是 Electron，自动加 ELECTRON_RUN_AS_NODE=1"""
+    node_bin = _find_node()
+    env = os.environ.copy()
+    # 关键：如果 node 是 Electron 自身，需要 ELECTRON_RUN_AS_NODE=1
+    # 同时把父进程的 ELECTRON_RUN_AS_NODE 清空（避免影响自身）
+    env.pop("ELECTRON_RUN_AS_NODE", None)
+    node_is_electron = any(k in node_bin.lower() for k in ["electron", "temu assistant", "temu-assistant"])
+    if node_is_electron:
+        env["ELECTRON_RUN_AS_NODE"] = "1"
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [node_bin] + args,
+        capture_output=True, timeout=timeout,
+        cwd=cwd or _find_ws_module(),
+        env=env
+    )
 
-    # 1. 优先：python-scripts 同级的 node_modules/ws（打包时 extraResources 放这里）
-    parent = os.path.dirname(script_dir)
-    if os.path.exists(os.path.join(parent, "node_modules", "ws")):
-        return parent
-
-    # 2. electron-app/node_modules（开发模式）
-    project_root = os.path.dirname(parent)
-    electron_app = os.path.join(project_root, "electron-app")
-    if os.path.exists(os.path.join(electron_app, "node_modules", "ws")):
-        return electron_app
-
-    # 3. 项目根 node_modules
-    if os.path.exists(os.path.join(project_root, "node_modules", "ws")):
-        return project_root
-
-    # 4. 打包后 Resources 目录（script_dir 的父父）
-    resources_dir = os.path.dirname(parent)
-    if os.path.exists(os.path.join(resources_dir, "node_modules", "ws")):
-        return resources_dir
-
-    return parent  # fallback
 
 
 
@@ -240,9 +195,7 @@ http.get('http://127.0.0.1:{CDP_PORT}/json', (res) => {{
   }});
 }}).on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
 """
-    node_bin = _find_node()
-    ws_path = _find_ws_module()
-    result = subprocess.run([node_bin, "-e", node_script], capture_output=True, timeout=8, cwd=ws_path)
+    result = _run_node(["-e", node_script], timeout=8)
     target_id = result.stdout.decode('utf-8', errors='replace').strip()
     if not target_id:
         return None
