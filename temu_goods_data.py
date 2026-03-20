@@ -1,162 +1,255 @@
 """
 Temu 运营助手 — 商品数据抓取
 页面: https://agentseller.temu.com/newon/goods-data
+使用 CDP WebSocket 直接执行 JS，读取 Beast 组件库的表格数据
 """
 import sys
 import os
 import time
+import json
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(__file__))
 from src.temu_utils import (
-    bb, bb_json, get_tab_by_domain, open_new_tab, navigate_tab,
-    wait_for_selector, click_next_page, install_temu_adapters,
-    desktop_path, timestamped_name
+    install_temu_adapters, desktop_path, timestamped_name,
+    cdp_eval, cdp_navigate, get_tab_ws_url
 )
 from src.temu_excel import write_temu_excel
 
 GOODS_URL = "https://agentseller.temu.com/newon/goods-data"
-LOGIN_URL  = "https://agentseller.temu.com/"
-DOMAIN     = "agentseller.temu.com"
+DOMAIN    = "agentseller.temu.com"
 
-def set_date_filter(tab: str, start_date: str, end_date: str):
-    """通过 eval 注入 JS 设置日期筛选"""
-    # Temu 后台通常是 ant-design DatePicker，尝试通过 React fiber 设置值
-    js = f"""
-    (async function() {{
-      // 找 datepicker 输入框并设置
-      const inputs = document.querySelectorAll('.ant-picker-input input, [class*="date-picker"] input, [class*="datepicker"] input');
-      if (inputs.length >= 2) {{
-        const startInput = inputs[0];
-        const endInput = inputs[1];
-        // 模拟用户输入
-        function setVal(el, val) {{
-          el.focus();
-          el.value = val;
-          el.dispatchEvent(new Event('input', {{bubbles: true}}));
-          el.dispatchEvent(new Event('change', {{bubbles: true}}));
+
+def scrape_page(ws_url: str, print_fn=print) -> list:
+    """用 CDP eval 抓取当前页的表格数据"""
+    js = """
+    (function() {
+      var results = [];
+      var rows = document.querySelectorAll('tbody tr.TB_tr_5-120-1');
+      for (var ri = 0; ri < rows.length; ri++) {
+        var row = rows[ri];
+        // 跳过 checkbox 列（TB_checkCell），从普通 td 开始
+        var tds = row.querySelectorAll('td.TB_td_5-120-1:not(.TB_checkCell_5-120-1)');
+        if (tds.length < 3) continue;
+
+        // tds[0] = 商品信息（商品名、分类、SPU、SKC）
+        var infoText = tds[0].innerText.trim();
+        var lines = infoText.split('\\n').map(function(s){ return s.trim(); }).filter(Boolean);
+        var goodsName = '', category = '', spu = '', skc = '';
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i] === 'SPU：') { spu = lines[i+1] || ''; i++; }
+          else if (lines[i] === 'SKC：') { skc = lines[i+1] || ''; i++; }
+          else if (!goodsName) goodsName = lines[i];
+          else if (!category) category = lines[i];
+        }
+
+        // tds[1] = 国家/地区
+        var country = tds[1] ? tds[1].innerText.trim() : '';
+
+        // tds[2] = 支付件数 + 趋势
+        var payText = tds[2] ? tds[2].innerText.trim() : '';
+        var payLines = payText.split('\\n').map(function(s){ return s.trim(); }).filter(Boolean);
+        var payCount = payLines[0] || '';
+        var trend = payLines[1] || '';
+
+        if (goodsName || spu) {
+          results.push([goodsName, category, spu, skc, country, payCount, trend]);
+        }
+      }
+      return results;
+    })()
+    """
+    result = cdp_eval(ws_url, js)
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def get_total_pages(ws_url: str) -> int:
+    """获取总页数"""
+    js = """
+    (function() {
+      var totalEl = document.querySelector('.PGT_totalText_5-120-1');
+      if (!totalEl) return {total: 0, pages: 1};
+      var m = totalEl.textContent.match(/(\\d+)/);
+      var total = m ? parseInt(m[1]) : 0;
+      var nextBtn = document.querySelector('.PGT_next_5-120-1');
+      var lastPageEl = document.querySelector('.PGT_outerWrapper_5-120-1 li.PGT_pagerItem_5-120-1:last-of-type');
+      var lastPage = lastPageEl ? parseInt(lastPageEl.textContent.trim()) : 1;
+      return {total: total, lastPage: lastPage};
+    })()
+    """
+    result = cdp_eval(ws_url, js)
+    if isinstance(result, dict):
+        return result.get('lastPage', 1)
+    return 1
+
+
+def has_next_page(ws_url: str) -> bool:
+    js = """
+    (function() {
+      var next = document.querySelector('.PGT_next_5-120-1');
+      return next && !next.classList.contains('PGT_disabled_5-120-1');
+    })()
+    """
+    return bool(cdp_eval(ws_url, js))
+
+
+def click_next_page(ws_url: str) -> bool:
+    js = """
+    (function() {
+      var next = document.querySelector('.PGT_next_5-120-1');
+      if (next && !next.classList.contains('PGT_disabled_5-120-1')) {
+        next.click(); return true;
+      }
+      return false;
+    })()
+    """
+    return bool(cdp_eval(ws_url, js))
+
+
+def wait_table_load(ws_url: str, old_count: int, timeout: int = 8) -> bool:
+    """等待表格重新加载（行数变化 or loading 消失）"""
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(0.5)
+        js = "document.querySelectorAll('tbody tr.TB_tr_5-120-1').length"
+        count = cdp_eval(ws_url, js)
+        if isinstance(count, int) and count != old_count:
+            time.sleep(0.3)
+            return True
+    return False
+
+
+def set_time_filter(ws_url: str, option_text: str, print_fn=print) -> bool:
+    """设置时间区间下拉选择（如：近7天/近30天/近90天）"""
+    # 点击时间区间 Select
+    js = """
+    (function() {
+      var labels = document.querySelectorAll('*');
+      for (var i = 0; i < labels.length; i++) {
+        if (labels[i].children.length === 0 && labels[i].textContent.trim() === '时间区间') {
+          var field = labels[i].nextElementSibling;
+          if (field) {
+            var sel = field.querySelector('[data-testid="beast-core-select"]');
+            if (sel) { sel.click(); return 'clicked'; }
+          }
+        }
+      }
+      return 'not-found';
+    })()
+    """
+    r = cdp_eval(ws_url, js)
+    if r != 'clicked':
+        return False
+
+    time.sleep(0.5)
+
+    # 找并点击选项
+    js2 = f"""
+    (function() {{
+      var opts = document.querySelectorAll('[data-testid="beast-core-select-option"], [class*="ST_option"]');
+      for (var i = 0; i < opts.length; i++) {{
+        if (opts[i].textContent.trim().indexOf('{option_text}') >= 0) {{
+          opts[i].click();
+          return 'selected:' + opts[i].textContent.trim();
         }}
-        setVal(startInput, '{start_date}');
-        await new Promise(r => setTimeout(r, 300));
-        setVal(endInput, '{end_date}');
-        await new Promise(r => setTimeout(r, 300));
-        // 按 Enter 确认
-        endInput.dispatchEvent(new KeyboardEvent('keydown', {{key: 'Enter', bubbles: true}}));
-        return 'ok';
       }}
-      // 找日期范围按钮
-      const rangeBtn = document.querySelector('[class*="date-range"], [class*="dateRange"]');
-      if (rangeBtn) {{
-        rangeBtn.click();
-        await new Promise(r => setTimeout(r, 500));
-      }}
-      return 'no-input-found';
+      var available = [];
+      for (var i = 0; i < opts.length; i++) available.push(opts[i].textContent.trim());
+      return 'not-found:' + available.join(',');
     }})()
     """
-    r = bb(["eval", js, "--tab", tab], timeout=10)
-    return r.stdout.strip()
-
-
-def scrape_all_pages(tab: str, console_print=print) -> tuple[list, list]:
-    """循环抓取所有分页，返回 (headers, all_rows)"""
-    all_rows = []
-    headers  = []
-    page = 1
-
-    while True:
-        console_print(f"  正在抓取第 {page} 页...")
-        data = bb_json(["site", "temu/goods-data"])
-
-        if "error" in data:
-            console_print(f"  ⚠️  第 {page} 页抓取出错: {data['error']}")
-            break
-
-        if not headers and data.get("headers"):
-            headers = data["headers"]
-
-        rows = data.get("items", [])
-        all_rows.extend(rows)
-        console_print(f"  ✓ 第 {page} 页获取 {len(rows)} 条")
-
-        if not data.get("hasNextPage", False):
-            break
-
-        # 翻页
-        clicked = click_next_page(tab)
-        if not clicked:
-            console_print("  ↳ 未找到下一页按钮，停止")
-            break
-
-        time.sleep(2.5)  # 等待数据加载
-        page += 1
-
-    return headers, all_rows
+    r2 = cdp_eval(ws_url, js2)
+    print_fn(f"  时间筛选: {r2}")
+    return str(r2).startswith('selected:')
 
 
 def run(mode: str = "current", start_date: str = "", end_date: str = "",
         output_path: str = None, login_wait: int = 40, print_fn=print):
-    """
-    mode: 'current'（在当前页面）或 'new'（全新页面）
-    start_date/end_date: 'YYYY-MM-DD'
-    output_path: 输出文件路径（默认桌面）
-    """
     install_temu_adapters()
 
     if output_path is None:
         output_path = desktop_path(timestamped_name("temu_goods_data"))
 
-    tab = None
-
-    if mode == "new":
-        print_fn(f"📂 新开页面，导航到 {LOGIN_URL}")
-        tab = open_new_tab(LOGIN_URL)
-        print_fn(f"⏳ 请在 {login_wait}s 内完成登录并切换到目标站点/店铺...")
-        time.sleep(login_wait)
-        # 导航到商品数据页
-        navigate_tab(tab, GOODS_URL)
-        time.sleep(3)
-    else:
-        print_fn(f"🔍 在当前已登录页面操作...")
-        tab = get_tab_by_domain(DOMAIN)
-        if not tab:
-            print_fn(f"⚠️  未找到 {DOMAIN} 的 tab，尝试新开页面...")
-            tab = open_new_tab(GOODS_URL)
-            time.sleep(5)
-        else:
-            navigate_tab(tab, GOODS_URL)
-            time.sleep(3)
-
-    if tab is None:
-        print_fn("❌ 无法找到或打开 tab，退出")
+    # 获取 tab ws url
+    ws_url = get_tab_ws_url(DOMAIN)
+    if not ws_url:
+        print_fn(f"❌ 未找到 {DOMAIN} 的 tab，请先在 Chrome 中打开 Temu 运营后台")
         return None
 
-    # 等待页面加载
+    # 导航到商品数据页
+    print_fn(f"🔍 导航到商品数据页面...")
+    cdp_navigate(ws_url, GOODS_URL)
+    time.sleep(3)
+
+    # 等待表格出现
     print_fn("⏳ 等待页面加载...")
-    wait_for_selector(tab, 'table, [class*="table"]', max_wait=20)
+    start = time.time()
+    while time.time() - start < 15:
+        js = "document.querySelectorAll('tbody tr.TB_tr_5-120-1').length"
+        count = cdp_eval(ws_url, js)
+        if isinstance(count, int) and count > 0:
+            break
+        time.sleep(1)
+    print_fn(f"  页面已加载，检测到 {count} 行数据")
+
+    # 设置时间筛选
+    if start_date or end_date:
+        print_fn(f"📅 设置时间筛选: {start_date} ~ {end_date}")
+        # 将日期范围转换为最接近的预设选项（近30天/近90天等）
+        # 或者直接不设置，使用默认值抓取当前显示数据
+        # Temu 后台时间筛选是 Select 下拉，不是自由日期输入
+        print_fn("  ℹ️  Temu 商品数据页时间区间为预设下拉（近7天/近30天/近90天）")
+        print_fn("  ℹ️  将使用默认时间范围抓取当前显示数据")
+
+    # 点查询刷新（确保数据是最新的）
+    js_query = """
+    (function(){
+      var btns = document.querySelectorAll('button');
+      for (var i=0; i<btns.length; i++){
+        if (btns[i].textContent.trim() === '查询') { btns[i].click(); return true; }
+      }
+      return false;
+    })()
+    """
+    cdp_eval(ws_url, js_query)
     time.sleep(2)
 
-    # 设置日期筛选
-    if start_date and end_date:
-        print_fn(f"📅 设置时间筛选: {start_date} ~ {end_date}")
-        result = set_date_filter(tab, start_date, end_date)
-        print_fn(f"  筛选状态: {result}")
-        time.sleep(2.5)
-
-    # 开始抓取
+    # 开始抓取所有页
     print_fn("🚀 开始抓取商品数据...")
-    headers, rows = scrape_all_pages(tab, print_fn)
+    headers = ["商品名称", "商品分类", "SPU", "SKC", "国家/地区", "支付件数", "销售趋势"]
+    all_rows = []
+    page = 1
 
-    if not rows:
+    while True:
+        old_count = len(all_rows)
+        print_fn(f"  正在抓取第 {page} 页...")
+        rows = scrape_page(ws_url, print_fn)
+        all_rows.extend(rows)
+        print_fn(f"  ✓ 第 {page} 页获取 {len(rows)} 条")
+
+        if len(rows) == 0:
+            print_fn("  ⚠️ 本页无数据，停止")
+            break
+
+        if not has_next_page(ws_url):
+            print_fn("  ↳ 已是最后一页")
+            break
+
+        # 翻页
+        cur_count = cdp_eval(ws_url, "document.querySelectorAll('tbody tr.TB_tr_5-120-1').length")
+        click_next_page(ws_url)
+        wait_table_load(ws_url, cur_count if isinstance(cur_count, int) else 0)
+        page += 1
+        time.sleep(0.5)
+
+    if not all_rows:
         print_fn("⚠️  未抓取到任何数据，请检查页面状态")
         return None
 
-    # 如果表头为空，用列序号
-    if not headers:
-        max_cols = max(len(r) for r in rows) if rows else 0
-        headers = [f"列{i+1}" for i in range(max_cols)]
-
-    # 写 Excel
-    write_temu_excel(output_path, [{"title": "商品数据", "headers": headers, "rows": rows}])
-    print_fn(f"\n✅ 完成！共 {len(rows)} 条，文件已保存到:\n   {output_path}")
+    write_temu_excel(output_path, [{"title": "商品数据", "headers": headers, "rows": all_rows}])
+    print_fn(f"\n✅ 完成！共 {len(all_rows)} 条，已保存到:\n   {output_path}")
     return output_path
 
 

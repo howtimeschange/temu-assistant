@@ -7,9 +7,130 @@ import os
 import re
 import subprocess
 import time
+import urllib.request
 from datetime import datetime
 
 CDP_PORT = os.environ.get("TEMU_CDP_PORT", "9222")
+
+
+# ── CDP WebSocket 直连工具 ─────────────────────────────────────────────────────
+
+def get_tab_ws_url(domain: str) -> str | None:
+    """通过 CDP HTTP API 找到包含指定域名的 tab 的 WebSocket URL"""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json", timeout=3) as resp:
+            tabs = json.loads(resp.read())
+        for tab in tabs:
+            if tab.get("type") == "page" and domain in tab.get("url", ""):
+                return tab.get("webSocketDebuggerUrl")
+    except Exception:
+        pass
+    return None
+
+
+def cdp_eval(ws_url: str, expression: str, timeout: int = 10):
+    """通过 CDP WebSocket 执行 JS 表达式，返回结果值"""
+    import threading
+    import json as _json
+
+    try:
+        import websocket as _ws_lib
+    except ImportError:
+        _ws_lib = None
+
+    # 使用 node 内置 ws 模块执行（因为 Python 没有 websocket-client）
+    node_script = f"""
+const WebSocket = require('ws');
+const ws = new WebSocket({_json.dumps(ws_url)});
+let done = false;
+ws.on('open', () => {{
+  ws.send(JSON.stringify({{id: 1, method: 'Runtime.evaluate', params: {{
+    expression: {_json.dumps(expression)},
+    returnByValue: true,
+    awaitPromise: true
+  }}}}));
+}});
+ws.on('message', (raw) => {{
+  if (done) return;
+  const msg = JSON.parse(raw.toString());
+  if (msg.id === 1) {{
+    done = true;
+    const r = msg.result && msg.result.result;
+    if (r && r.value !== undefined) process.stdout.write(JSON.stringify(r.value));
+    else if (r && r.type === 'boolean') process.stdout.write(String(r.value));
+    else process.stdout.write(JSON.stringify(null));
+    ws.close();
+    process.exit(0);
+  }}
+}});
+ws.on('error', e => {{ process.stderr.write(e.message); process.exit(1); }});
+setTimeout(() => {{ process.exit(1); }}, {timeout * 1000});
+"""
+
+    # 找 node 可执行路径
+    node_bin = _find_node()
+    # 找 ws 模块路径
+    ws_path = _find_ws_module()
+
+    result = subprocess.run(
+        [node_bin, "--input-type=module" if False else "-e", node_script],
+        capture_output=True, text=True, timeout=timeout + 2,
+        cwd=ws_path
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return json.loads(result.stdout.strip())
+    except Exception:
+        return result.stdout.strip()
+
+
+def cdp_navigate(ws_url: str, url: str, wait: float = 0.5):
+    """通过 CDP 导航到指定 URL"""
+    node_script = f"""
+const WebSocket = require('ws');
+const ws = new WebSocket({json.dumps(ws_url)});
+ws.on('open', () => {{
+  ws.send(JSON.stringify({{id: 1, method: 'Page.navigate', params: {{url: {json.dumps(url)}}}}}));
+  setTimeout(() => {{ ws.close(); process.exit(0); }}, 500);
+}});
+ws.on('error', e => {{ process.exit(1); }});
+setTimeout(() => process.exit(0), 3000);
+"""
+    node_bin = _find_node()
+    ws_path = _find_ws_module()
+    subprocess.run([node_bin, "-e", node_script], capture_output=True, timeout=5, cwd=ws_path)
+    if wait:
+        time.sleep(wait)
+
+
+def _find_node() -> str:
+    """找 node 可执行路径"""
+    node_env = os.environ.get("ELECTRON_NODE_BIN")
+    if node_env and os.path.exists(node_env):
+        return node_env
+    for p in ["/opt/homebrew/bin/node", "/usr/local/bin/node", "node"]:
+        if p == "node" or os.path.exists(p):
+            return p
+    return "node"
+
+
+def _find_ws_module() -> str:
+    """找包含 ws 模块的 node_modules 目录"""
+    # Electron app 目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+
+    # 优先用 electron-app/node_modules
+    electron_app = os.path.join(project_root, "electron-app")
+    if os.path.exists(os.path.join(electron_app, "node_modules", "ws")):
+        return electron_app
+
+    # 回退到项目根
+    if os.path.exists(os.path.join(project_root, "node_modules", "ws")):
+        return project_root
+
+    return project_root
 
 
 def bb(args, timeout=20):
