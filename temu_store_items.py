@@ -184,10 +184,10 @@ def scrape_items_batch(ws_url: str, offset: int, limit: int = 50) -> list:
         var allSoldEls = card.querySelectorAll('._2XgTiMJi');
         for (var j=0; j<allSoldEls.length; j++) {{
           var t = allSoldEls[j].innerText.trim();
-          if (t.startsWith('已售') || t.startsWith('Sold') || t.match(/^\\d+.*件$/) || t.match(/^Sold\\s+\\d+/i)) {{ soldEl = allSoldEls[j]; break; }}
+          if (t.startsWith('已售') || /^[Ss]old/i.test(t) || /^\\d+.*(?:件|sold)/i.test(t)) {{ soldEl = allSoldEls[j]; break; }}
         }}
         if (soldEl) {{
-          r.sold = soldEl.innerText.trim().replace(/^已售/, '').replace(/^Sold\\s+/i, '');
+          r.sold = soldEl.innerText.trim().replace(/^已售/, '').replace(/^[Ss]old\\s*/i, '').replace(/sold$/i, '');
         }} else {{
           for (var j = 0; j < allEls.length; j++) {{
             var t = allEls[j].children.length === 0 && allEls[j].innerText
