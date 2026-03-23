@@ -436,6 +436,17 @@ def set_custom_date_range(ws_url: str, start_date: str, end_date: str, print_fn=
         print_fn(f"  日期格式错误: {ex}")
         return False
 
+    # 校验：结束日期不能早于开始日期
+    if e < s:
+        print_fn(f"  错误：结束日期不能早于开始日期")
+        return False
+
+    # 校验：时间区间不能超过31天（页面限制）
+    if (e - s).days > 31:
+        print_fn(f"  错误：时间区间不能超过31天（当前 {(e-s).days} 天）")
+        return False
+        return False
+
     # Step1: 打开下拉，选「自定义」
     if not _open_time_range_dropdown(ws_url, print_fn):
         return False

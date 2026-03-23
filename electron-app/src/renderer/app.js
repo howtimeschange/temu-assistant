@@ -208,6 +208,16 @@ document.getElementById('btn-goods-start').addEventListener('click', async () =>
       showToast('请填写自定义日期范围')
       return
     }
+    // 校验：不能超过31天
+    const diffDays = (new Date(params.end_date) - new Date(params.start_date)) / 86400000
+    if (diffDays < 0) {
+      showToast('结束日期不能早于开始日期')
+      return
+    }
+    if (diffDays > 31) {
+      showToast('自定义日期范围不能超过31天')
+      return
+    }
   }
 
   appendLog('goods', '\n▶ 开始抓取商品数据…')
