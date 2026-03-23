@@ -576,6 +576,8 @@ ipcMain.handle('run-task', async (_, task, params) => {
       const mode = params.mode || 'current'
       args = ['--mode', mode]
       if (params.time_range) args.push('--time-range', params.time_range)
+      if (params.start_date) args.push('--start-date', params.start_date)
+      if (params.end_date) args.push('--end-date', params.end_date)
       break
     }
     case 'aftersales': {

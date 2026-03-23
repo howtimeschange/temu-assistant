@@ -178,6 +178,22 @@ async function stopCurrentTask() {
 }
 
 // ── 商品数据 ──────────────────────────────────────────────────────────────────
+// 时间区间联动：选「自定义」时显示日期输入行
+document.getElementById('goods-time-range').addEventListener('change', function () {
+  const customRow = document.getElementById('goods-custom-date-row')
+  if (this.value === '自定义') {
+    customRow.style.display = ''
+    // 默认填入近7日的日期范围
+    const today = new Date()
+    const end = today.toISOString().slice(0, 10)
+    const start = new Date(today - 6 * 86400000).toISOString().slice(0, 10)
+    if (!document.getElementById('goods-start-date').value) document.getElementById('goods-start-date').value = start
+    if (!document.getElementById('goods-end-date').value) document.getElementById('goods-end-date').value = end
+  } else {
+    customRow.style.display = 'none'
+  }
+})
+
 document.getElementById('btn-goods-start').addEventListener('click', async () => {
   if (state.running) { showToast('请先停止当前任务'); return }
 
@@ -185,6 +201,14 @@ document.getElementById('btn-goods-start').addEventListener('click', async () =>
   const timeRange = document.getElementById('goods-time-range').value
   const params = { mode }
   if (timeRange) params.time_range = timeRange
+  if (timeRange === '自定义') {
+    params.start_date = document.getElementById('goods-start-date').value
+    params.end_date = document.getElementById('goods-end-date').value
+    if (!params.start_date || !params.end_date) {
+      showToast('请填写自定义日期范围')
+      return
+    }
+  }
 
   appendLog('goods', '\n▶ 开始抓取商品数据…')
   setTaskRunning('goods-data', 'goods')

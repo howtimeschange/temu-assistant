@@ -86,11 +86,20 @@
             <div class="form-row">
               <label class="form-label">时间区间</label>
               <select class="form-select" id="goods-time-range">
-                <option value="">全部（不过滤）</option>
-                <option value="近7天">近 7 天</option>
-                <option value="近30天">近 30 天</option>
-                <option value="近90天">近 90 天</option>
+                <option value="">默认（不修改）</option>
+                <option value="昨日">昨日</option>
+                <option value="近7日">近 7 日</option>
+                <option value="近30日">近 30 日</option>
+                <option value="自定义">自定义日期</option>
               </select>
+            </div>
+            <div class="form-row" id="goods-custom-date-row" style="display:none">
+              <label class="form-label">自定义范围</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="date" class="form-input" id="goods-start-date" style="max-width:160px" />
+                <span style="color:#888">~</span>
+                <input type="date" class="form-input" id="goods-end-date" style="max-width:160px" />
+              </div>
             </div>
             <div class="form-actions">
               <button class="btn btn-primary btn-run" id="btn-goods-start">

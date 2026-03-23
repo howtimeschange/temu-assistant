@@ -107,14 +107,24 @@ def _find_ws_module() -> str:
     # 2. 相对于本文件位置推算（src/temu_utils.py → ../node_modules/ws）
     here = os.path.dirname(os.path.abspath(__file__))
     for base in [
-        os.path.join(here, ".."),            # 开发: python-scripts/src/ → python-scripts/
-        os.path.join(here, "..", ".."),      # 开发: src/ → electron-app/ (如果脚本在根)
+        os.path.join(here, ".."),                        # 开发: src/ → 项目根
+        os.path.join(here, "..", ".."),                  # 开发: src/ → 上两级
+        os.path.join(here, "..", "electron-app"),        # 开发: 项目根/src/ → 项目根/electron-app/
+        os.path.join(here, "..", "..", "electron-app"),  # 开发: 项目根/src/ → 项目根/electron-app/
     ]:
         candidate = os.path.join(base, "node_modules", "ws")
         if os.path.isdir(os.path.normpath(candidate)):
             return os.path.normpath(base)
 
-    # 3. fallback: 当前工作目录
+    # 3. 从 cwd 向上查找 node_modules/ws（兼容各种启动路径）
+    cwd = os.getcwd()
+    for base in [cwd, os.path.join(cwd, "electron-app"), os.path.dirname(cwd),
+                 os.path.join(os.path.dirname(cwd), "electron-app")]:
+        candidate = os.path.join(base, "node_modules", "ws")
+        if os.path.isdir(candidate):
+            return base
+
+    # 4. fallback: 当前工作目录
     return os.getcwd()
 
 
