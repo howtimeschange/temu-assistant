@@ -3,7 +3,7 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'           # 推 v1.0.1 等 tag 时自动触发
+      - 'v*'           # 推 v1.0.3 等 tag 时自动触发
   workflow_dispatch:   # 支持手动触发
 
 permissions:
@@ -33,12 +33,12 @@ jobs:
 
           echo "⬇️ Python arm64..."
           curl -L -o /tmp/py_arm64.tar.gz \
-            "${BASE}/cpython-3.12.13%2B20260310-aarch64-apple-darwin-install_only_stripped.tar.gz"
+            "${BASE}/cpython-3.12.13%2B20260310-aarch64-apple-darwin-install_only.tar.gz"
           tar -xzf /tmp/py_arm64.tar.gz -C "$DIST/mac-arm64" --strip-components=1
 
           echo "⬇️ Python x64..."
           curl -L -o /tmp/py_x64.tar.gz \
-            "${BASE}/cpython-3.12.13%2B20260310-x86_64-apple-darwin-install_only_stripped.tar.gz"
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-apple-darwin-install_only.tar.gz"
           tar -xzf /tmp/py_x64.tar.gz -C "$DIST/mac-x64" --strip-components=1
 
           echo "📦 Installing openpyxl + fastapi + uvicorn..."
@@ -56,7 +56,7 @@ jobs:
 
       - name: Verify Python bundled in arm64 DMG
         run: |
-          hdiutil attach "electron-app/dist/Temu Assistant-1.0.0-arm64.dmg" \
+          hdiutil attach "electron-app/dist/Temu Assistant-1.0.3-arm64.dmg" \
             -readonly -quiet -mountpoint /tmp/verify_dmg
           ls "/tmp/verify_dmg/Temu Assistant.app/Contents/Resources/" | grep python \
             && echo "✅ python dir found" || echo "❌ python dir missing"
@@ -90,18 +90,19 @@ jobs:
           DIST="electron-app/python-dist"
           mkdir -p "$DIST/win-x64"
 
-          echo "⬇️ Python win-x64..."
+          echo "⬇️ Python win-x64 (install_only, includes python312.dll)..."
           curl -L -o /tmp/py_win.tar.gz \
-            "${BASE}/cpython-3.12.13%2B20260310-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+            "${BASE}/cpython-3.12.13%2B20260310-x86_64-pc-windows-msvc-install_only.tar.gz"
           tar -xzf /tmp/py_win.tar.gz -C "$DIST/win-x64" --strip-components=1
 
-          # openpyxl: 纯 Python 包，从 mac-arm64 直接 copy 最快（但 CI 上没有）
-          # 改用 pip 直接安装到 Lib/site-packages
-          # Windows runner 有 Python3，用它来 pip install 到目标目录
           WIN_SITE="$DIST/win-x64/Lib/site-packages"
           mkdir -p "$WIN_SITE"
           pip install openpyxl fastapi uvicorn --target "$WIN_SITE" --quiet
           echo "✅ openpyxl + fastapi + uvicorn installed to win-x64"
+
+          echo "🔍 Verify python312.dll present:"
+          ls "$DIST/win-x64/" | grep -i dll || echo "(no dll in root, checking subdirs)"
+          find "$DIST/win-x64" -name "python3*.dll" 2>/dev/null | head -5
 
       - name: Build Windows NSIS installer
         shell: bash
@@ -150,8 +151,8 @@ jobs:
             | Windows 10/11 | `*Setup*.exe` | x64 |
 
             ## ✅ 开箱即用
-            - 无需安装 Python 或 Node.js
-            - 内置 CPython 3.12.13 + openpyxl
+            - 无需安装 Python 或 Node.js，无需安装 VC++ 运行时
+            - 内置 CPython 3.12.13 + openpyxl（完整版，已包含所有 DLL）
 
             ## 🚀 使用前提
             - Chrome 浏览器（用于 CDP 抓取）
@@ -159,6 +160,10 @@ jobs:
 
             ## 📋 功能
             - 商品数据 / 售后数据 / 店铺评价 / 店铺商品 → 导出 Excel
+
+            ## 🔧 v1.0.3 修复
+            - 修复 Windows 上 Python 启动崩溃（exit code 3221225781 / STATUS_DLL_NOT_FOUND）
+            - 换用完整版 Python（install_only），内含 python312.dll，无需额外安装任何运行时
 
           files: dist/*
           draft: false
