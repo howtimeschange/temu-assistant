@@ -3,16 +3,15 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'           # 推 v1.0.3 等 tag 时自动触发
-  workflow_dispatch:   # 支持手动触发
+      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  # ─── macOS (arm64 + x64) ─────────────────────────────────────────────────
   build-mac:
-    runs-on: macos-14   # Apple Silicon
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -56,7 +55,7 @@ jobs:
 
       - name: Verify Python bundled in arm64 DMG
         run: |
-          hdiutil attach "electron-app/dist/Temu Assistant-1.0.3-arm64.dmg" \
+          hdiutil attach "electron-app/dist/Temu Assistant-1.0.5-arm64.dmg" \
             -readonly -quiet -mountpoint /tmp/verify_dmg
           ls "/tmp/verify_dmg/Temu Assistant.app/Contents/Resources/" | grep python \
             && echo "✅ python dir found" || echo "❌ python dir missing"
@@ -68,7 +67,6 @@ jobs:
           path: electron-app/dist/*.dmg
           retention-days: 3
 
-  # ─── Windows x64 ─────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -101,7 +99,6 @@ jobs:
           echo "✅ openpyxl + fastapi + uvicorn installed to win-x64"
 
           echo "🔍 Verify python312.dll present:"
-          ls "$DIST/win-x64/" | grep -i dll || echo "(no dll in root, checking subdirs)"
           find "$DIST/win-x64" -name "python3*.dll" 2>/dev/null | head -5
 
       - name: Build Windows NSIS installer
@@ -118,7 +115,6 @@ jobs:
           path: electron-app/dist/*.exe
           retention-days: 3
 
-  # ─── Create GitHub Release ────────────────────────────────────────────────
   release:
     needs: [build-mac, build-windows]
     runs-on: ubuntu-latest
@@ -152,7 +148,7 @@ jobs:
 
             ## ✅ 开箱即用
             - 无需安装 Python 或 Node.js，无需安装 VC++ 运行时
-            - 内置 CPython 3.12.13 + openpyxl（完整版，已包含所有 DLL）
+            - 内置 CPython 3.12.13 完整版（含 python312.dll 及所有依赖）
 
             ## 🚀 使用前提
             - Chrome 浏览器（用于 CDP 抓取）
@@ -161,9 +157,9 @@ jobs:
             ## 📋 功能
             - 商品数据 / 售后数据 / 店铺评价 / 店铺商品 → 导出 Excel
 
-            ## 🔧 v1.0.3 修复
+            ## 🔧 v1.0.5 修复
             - 修复 Windows 上 Python 启动崩溃（exit code 3221225781 / STATUS_DLL_NOT_FOUND）
-            - 换用完整版 Python（install_only），内含 python312.dll，无需额外安装任何运行时
+            - 换用完整版 Python（install_only），内含 python312.dll，彻底无需额外安装任何运行时
 
           files: dist/*
           draft: false
