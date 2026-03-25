@@ -55,8 +55,11 @@ jobs:
 
       - name: Verify Python bundled in arm64 DMG
         run: |
-          hdiutil attach "electron-app/dist/Temu Assistant-1.0.5-arm64.dmg" \
-            -readonly -quiet -mountpoint /tmp/verify_dmg
+          # 动态获取版本号，避免硬编码
+          VERSION=$(node -p "require('./electron-app/package.json').version")
+          DMG="electron-app/dist/Temu Assistant-${VERSION}-arm64.dmg"
+          echo "🔍 Verifying: $DMG"
+          hdiutil attach "$DMG" -readonly -quiet -mountpoint /tmp/verify_dmg
           ls "/tmp/verify_dmg/Temu Assistant.app/Contents/Resources/" | grep python \
             && echo "✅ python dir found" || echo "❌ python dir missing"
           hdiutil detach /tmp/verify_dmg -quiet
@@ -98,8 +101,20 @@ jobs:
           pip install openpyxl fastapi uvicorn --target "$WIN_SITE" --quiet
           echo "✅ openpyxl + fastapi + uvicorn installed to win-x64"
 
-          echo "🔍 Verify python312.dll present:"
-          find "$DIST/win-x64" -name "python3*.dll" 2>/dev/null | head -5
+          echo "🔍 Verify key files present:"
+          find "$DIST/win-x64" -name "python3*.dll" 2>/dev/null
+          ls "$DIST/win-x64/python.exe" && echo "✅ python.exe exists"
+
+      - name: Smoke-test bundled python.exe
+        shell: cmd
+        run: |
+          echo Testing bundled python.exe...
+          electron-app\python-dist\win-x64\python.exe --version
+          if %errorlevel% neq 0 (
+            echo FAILED: python.exe exited with code %errorlevel%
+            exit /b %errorlevel%
+          )
+          echo PASS: python.exe runs OK
 
       - name: Build Windows NSIS installer
         shell: bash
@@ -153,13 +168,6 @@ jobs:
             ## 🚀 使用前提
             - Chrome 浏览器（用于 CDP 抓取）
             - 在 Chrome 中登录 Temu 账号后，点击对应功能开始抓取
-
-            ## 📋 功能
-            - 商品数据 / 售后数据 / 店铺评价 / 店铺商品 → 导出 Excel
-
-            ## 🔧 v1.0.5 修复
-            - 修复 Windows 上 Python 启动崩溃（exit code 3221225781 / STATUS_DLL_NOT_FOUND）
-            - 换用完整版 Python（install_only），内含 python312.dll，彻底无需额外安装任何运行时
 
           files: dist/*
           draft: false
