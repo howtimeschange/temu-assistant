@@ -42,7 +42,7 @@
 | macOS (Intel) | `Temu.Assistant-*-x64.dmg` | Intel Mac |
 | Windows 10/11 | `Temu.Assistant.Setup-*.exe` | x64 |
 
-> ✅ **内置 Python 3.12 + openpyxl，无需安装 Python 或 Node.js**  
+> ✅ **内置 Python 3.12 + openpyxl，无需安装 Python、Node.js 或 VC++ 运行时**  
 > 唯一前提：安装 [Google Chrome](https://www.google.com/chrome/)
 
 ### 本地开发运行
@@ -142,6 +142,11 @@ Temu 运营后台使用自研 Beast 组件库（非 antd），关键选择器：
 
 ## 📋 更新日志
 
+### v1.0.5（2026-03-25）
+
+**修复**
+- **Windows 上 Python 启动崩溃（exit code 3221225781 / STATUS_DLL_NOT_FOUND）**：之前打包使用的是 `python-build-standalone` 的 `stripped` 裁剪版，缺少 `python312.dll`，导致部分 Windows 机器上程序启动瞬间崩溃、无法执行任何抓取。现已改用 `install_only` 完整版，包含所有必要 DLL，**无需安装 VC++ 运行时或任何额外依赖**。
+
 ### v1.0.4（2026-03-23）
 
 **修复**
@@ -186,6 +191,10 @@ xattr -cr "/Applications/Temu Assistant.app"
 ```
 
 然后正常双击打开即可。
+
+**Windows 上启动后无法抓取数据（程序瞬间退出）**
+
+请升级到 v1.0.5，该版本已内置完整 Python 运行时，无需安装任何额外依赖。
 
 ---
 
