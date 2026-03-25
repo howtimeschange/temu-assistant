@@ -61,12 +61,20 @@ function copyDirSync(src, dest) {
       fs.mkdirSync(d, { recursive: true })
       copyDirSync(s, d)
     } else if (entry.isSymbolicLink()) {
+      // On Windows, symlink creation requires elevated privileges and often fails.
+      // Resolve the symlink and copy the actual file content instead.
       try {
-        const target = fs.readlinkSync(s)
-        if (fs.existsSync(d)) fs.unlinkSync(d)
-        fs.symlinkSync(target, d)
+        const realSrc = fs.realpathSync(s)
+        fs.copyFileSync(realSrc, d)
       } catch (e) {
-        // 忽略符号链接错误（Windows 无权限时）
+        // Fallback: try creating symlink (may work on Unix/macOS)
+        try {
+          const target = fs.readlinkSync(s)
+          if (fs.existsSync(d)) fs.unlinkSync(d)
+          fs.symlinkSync(target, d)
+        } catch (e2) {
+          console.warn(`[after-pack] WARN: could not copy symlink ${s} → ${d}: ${e2.message}`)
+        }
       }
     } else {
       fs.copyFileSync(s, d)

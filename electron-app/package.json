@@ -1,6 +1,6 @@
 {
   "name": "temu-assistant",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Temu 运营助手 - 商品数据/售后/评价/价格抓取",
   "main": "src/main.js",
   "scripts": {
