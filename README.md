@@ -17,6 +17,16 @@
 
 ---
 
+## 合作交流与赞助
+
+欢迎联系作者邢易成，交流「Temu 运营助手」的使用与想法、探讨项目合作，或赞助支持项目持续开发。
+
+使用微信扫描下方二维码添加好友，备注「Temu 运营助手 + 合作 / 交流 / 赞助」即可。此二维码与[抓虾官网](https://crawshrimp.com/)使用的联系方式一致。
+
+<a href="https://crawshrimp.com/wechat-qr.jpg">
+  <img src="https://crawshrimp.com/wechat-qr.jpg" alt="作者邢易成的微信联系二维码，用于Temu 运营助手合作交流与赞助联系" width="280" />
+</a>
+
 ## ✨ 功能
 
 | 模块 | 说明 |
