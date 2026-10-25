@@ -1,7 +1,5 @@
 # Temu 运营助手
 
-**[访问抓虾 Harness 官网 · 查看介绍与下载](https://harness.crawshrimp.com/)**
-
 <p align="center">
   <img src="electron-app/assets/icon.png" width="120" alt="Temu 运营助手" />
 </p>
