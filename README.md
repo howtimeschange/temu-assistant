@@ -1,5 +1,7 @@
 # Temu 运营助手
 
+**[访问抓虾 Harness 官网 · 查看介绍与下载](https://harness.crawshrimp.com/)**
+
 <p align="center">
   <img src="electron-app/assets/icon.png" width="120" alt="Temu 运营助手" />
 </p>
@@ -21,7 +23,7 @@
 
 欢迎联系作者，交流「Temu 运营助手」的使用与想法、探讨项目合作，或赞助支持项目持续开发。
 
-使用微信扫描下方二维码添加好友，备注「Temu 运营助手 + 合作 / 交流 / 赞助」即可。此二维码与[抓虾官网](https://crawshrimp.com/)使用的联系方式一致。
+使用微信扫描下方二维码添加好友，备注「Temu 运营助手 + 合作 / 交流 / 赞助」即可。
 
 <a href="https://crawshrimp.com/wechat-qr.jpg">
   <img src="https://crawshrimp.com/wechat-qr.jpg" alt="作者的微信联系二维码，用于Temu 运营助手合作交流与赞助联系" width="280" />
